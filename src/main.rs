@@ -788,14 +788,22 @@ async fn delete_portfolio(
         let _ = fs::remove_file(format!("uploads/{}", filename)).await;
     }
 
-    sqlx::query("DELETE FROM portfolios WHERE id = ?")
+    match sqlx::query("DELETE FROM portfolios WHERE id = ?")
         .bind(&id)
         .execute(&state.db)
         .await
-        .unwrap();
-
-    // Clear cache
-    state.cache.remove("index");
+    {
+        Ok(_) => {
+            println!("✅ DEBUG: Portfolio deleted successfully");
+            // Clear cache
+            state.cache.remove("index");
+        }
+        Err(e) => {
+            println!("❌ DEBUG: Error deleting portfolio: {}", e);
+            // Still clear cache and continue
+            state.cache.remove("index");
+        }
+    }
 
     Redirect::to("/admin").into_response()
 }
@@ -804,11 +812,12 @@ async fn download_pdf(Path(filename): Path<String>) -> impl IntoResponse {
     match fs::read(format!("uploads/{}", filename)).await {
         Ok(data) => {
             let mut headers = HeaderMap::new();
-            headers.insert("Content-Type", "application/pdf".parse().unwrap());
-            headers.insert(
-                "Content-Disposition",
-                format!("attachment; filename=\"{}\"", filename).parse().unwrap(),
-            );
+            if let Ok(content_type) = "application/pdf".parse() {
+                headers.insert("Content-Type", content_type);
+            }
+            if let Ok(disposition) = format!("attachment; filename=\"{}\"", filename).parse() {
+                headers.insert("Content-Disposition", disposition);
+            }
             (StatusCode::OK, headers, data).into_response()
         }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -840,11 +849,12 @@ async fn view_pdf(
         match fs::read(format!("uploads/{}", filename)).await {
             Ok(data) => {
                 let mut headers = HeaderMap::new();
-                headers.insert("Content-Type", "application/pdf".parse().unwrap());
-                headers.insert(
-                    "Content-Disposition",
-                    format!("inline; filename=\"{}\"", filename).parse().unwrap(),
-                );
+                if let Ok(content_type) = "application/pdf".parse() {
+                    headers.insert("Content-Type", content_type);
+                }
+                if let Ok(disposition) = format!("inline; filename=\"{}\"", filename).parse() {
+                    headers.insert("Content-Disposition", disposition);
+                }
                 (StatusCode::OK, headers, data).into_response()
             }
             Err(_) => StatusCode::NOT_FOUND.into_response(),
