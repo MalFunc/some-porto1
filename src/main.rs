@@ -123,7 +123,7 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
-        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB limit
+        .layer(DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB limit
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive());
 
@@ -611,7 +611,7 @@ async fn add_portfolio_page() -> impl IntoResponse {
             <a href="/">🏠 Home</a>
         </div>
         <h1>➕ ADD NEW WRITEUP</h1>
-        <form method="post" action="/admin/add" enctype="multipart/form-data">
+        <form method="post" action="/admin/add" enctype="multipart/form-data" onsubmit="return validateForm()">
             <div class="form-group">
                 <label for="title">🎯 Title:</label>
                 <input type="text" id="title" name="title" required placeholder="Enter CTF challenge title">
@@ -622,12 +622,45 @@ async fn add_portfolio_page() -> impl IntoResponse {
             </div>
             <div class="form-group">
                 <label for="pdf">📄 PDF File:</label>
-                <input type="file" id="pdf" name="pdf" accept=".pdf" required>
-                <small style="color: #ffff00; display: block; margin-top: 5px;">Upload your CTF writeup PDF</small>
+                <input type="file" id="pdf" name="pdf" accept=".pdf" required onchange="checkFileSize()">
+                <small style="color: #ffff00; display: block; margin-top: 5px;">Upload your CTF writeup PDF (Max: 20MB)</small>
+                <div id="fileError" style="color: #ff1020; display: none; margin-top: 5px;"></div>
             </div>
-            <button type="submit">🚀 ADD PORTFOLIO</button>
+            <button type="submit">🚀 ADD WRITEUP</button>
         </form>
     </div>
+    <script>
+        function checkFileSize() {
+            const fileInput = document.getElementById('pdf');
+            const errorDiv = document.getElementById('fileError');
+            const file = fileInput.files[0];
+            
+            if (file) {
+                const maxSize = 20 * 1024 * 1024; // 20MB in bytes
+                if (file.size > maxSize) {
+                    errorDiv.textContent = `File too large! Size: ${(file.size / (1024 * 1024)).toFixed(2)}MB. Maximum allowed: 20MB`;
+                    errorDiv.style.display = 'block';
+                    fileInput.value = ''; // Clear the file input
+                } else {
+                    errorDiv.style.display = 'none';
+                }
+            }
+        }
+        
+        function validateForm() {
+            const fileInput = document.getElementById('pdf');
+            const file = fileInput.files[0];
+            
+            if (file) {
+                const maxSize = 20 * 1024 * 1024; // 20MB in bytes
+                if (file.size > maxSize) {
+                    alert('File too large! Maximum size is 20MB.');
+                    return false;
+                }
+            }
+            return true;
+        }
+    </script>
 </body>
 </html>
     "#;
@@ -693,6 +726,13 @@ async fn add_portfolio(
                             match field.bytes().await {
                                 Ok(data) => {
                                     println!("✅ DEBUG: PDF data received ({} bytes)", data.len());
+                                    
+                                    // Check file size (20MB = 20,971,520 bytes)
+                                    if data.len() > 20 * 1024 * 1024 {
+                                        println!("❌ DEBUG: File too large: {} bytes", data.len());
+                                        return Html("File too large! Maximum size is 20MB.").into_response();
+                                    }
+                                    
                                     let uuid = Uuid::new_v4().to_string();
                                     pdf_filename = format!("{}_{}", uuid, filename);
                                     

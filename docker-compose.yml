@@ -23,8 +23,8 @@ services:
       - "traefik.http.routers.ctf-portfolio-http.entrypoints=web"
       - "traefik.http.routers.ctf-portfolio-http.middlewares=redirect-to-https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
-      # Increase upload size limit
-      - "traefik.http.middlewares.upload-limit.buffering.maxRequestBodyBytes=100000000"
+      # Increase upload size limit to 20MB
+      - "traefik.http.middlewares.upload-limit.buffering.maxRequestBodyBytes=20000000"
       - "traefik.http.routers.ctf-portfolio.middlewares=upload-limit"
       - "traefik.http.routers.ctf-portfolio-http.middlewares=redirect-to-https,upload-limit"
 
