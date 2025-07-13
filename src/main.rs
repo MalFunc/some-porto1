@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
         .layer(DefaultBodyLimit::disable()) // Disable default limit first
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(20 * 1024 * 1024)) // Then set custom 20MB limit
+        .layer(RequestBodyLimitLayer::new(20 * 1024 * 1024)) // Then set custom 20MB limit
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive());
 
