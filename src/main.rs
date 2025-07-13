@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path, State, ConnectInfo},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
@@ -7,7 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePool, Row};
-use std::{sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration, net::SocketAddr};
 use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
@@ -21,6 +21,9 @@ use tracing_subscriber;
 
 // Cache untuk performa
 type Cache = Arc<DashMap<String, CacheEntry>>;
+
+// Rate limiting untuk likes
+type RateLimiter = Arc<DashMap<String, DateTime<Utc>>>;
 
 #[derive(Clone)]
 struct CacheEntry {
@@ -41,6 +44,7 @@ impl CacheEntry {
 struct AppState {
     db: SqlitePool,
     cache: Cache,
+    rate_limiter: RateLimiter,
 }
 
 #[derive(Serialize, Deserialize, sqlx::FromRow)]
@@ -81,7 +85,12 @@ async fn main() -> anyhow::Result<()> {
     let cache = Arc::new(DashMap::new());
     println!("✅ DEBUG: Cache setup completed");
     
-    let state = AppState { db, cache };
+    // Setup rate limiter
+    println!("🔧 DEBUG: Setting up rate limiter...");
+    let rate_limiter = Arc::new(DashMap::new());
+    println!("✅ DEBUG: Rate limiter setup completed");
+    
+    let state = AppState { db, cache, rate_limiter };
 
     // Ensure upload directory exists
     println!("🔧 DEBUG: Creating upload directories...");
@@ -189,22 +198,99 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>🔥 CTF Portfolio - Hacker Zone 🔥</title>
+    <title>🔥 MalFunc - CTF Writeup 🔥</title>
     <style>
         body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; border-radius: 10px; padding: 20px; }
-        h1 { text-align: center; color: #ff0080; font-size: 2.5em; }
+        .container { max-width: 900px; margin: 0 auto; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; border-radius: 10px; padding: 20px; }
+        h1 { text-align: center; color: #ff0080; font-size: 2.5em; text-shadow: 0 0 10px #ff0080; }
         .nav { text-align: center; margin-bottom: 30px; padding: 10px; }
-        .nav a { color: #ffff00; text-decoration: none; margin: 0 15px; padding: 5px 10px; border: 1px solid #ffff00; }
-        .portfolio-item { border: 2px solid #00ff00; margin: 20px 0; padding: 15px; }
-        .portfolio-title { color: #ffff00; font-size: 1.4em; font-weight: bold; }
-        .portfolio-desc { color: #00ffff; margin: 10px 0; }
-        .download-btn { background: linear-gradient(45deg, #ff0080, #00ff00); border: none; color: #000; padding: 8px 15px; text-decoration: none; font-weight: bold; }
+        .nav a { color: #ffff00; text-decoration: none; margin: 0 15px; padding: 8px 15px; border: 1px solid #ffff00; border-radius: 5px; transition: all 0.3s; }
+        .nav a:hover { background: #ffff00; color: #000; }
+        .portfolio-item { 
+            border: 2px solid #00ff00; 
+            margin: 25px 0; 
+            padding: 20px; 
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(0, 255, 0, 0.1), rgba(0, 255, 255, 0.05));
+            box-shadow: 0 4px 15px rgba(0, 255, 0, 0.3);
+        }
+        .portfolio-title { 
+            color: #ffff00; 
+            font-size: 1.6em; 
+            font-weight: bold; 
+            margin-bottom: 15px;
+            text-shadow: 0 0 5px #ffff00;
+        }
+        .portfolio-desc { 
+            color: #00ffff; 
+            margin: 15px 0; 
+            line-height: 1.6;
+            font-size: 1.1em;
+            white-space: pre-wrap;
+        }
+        .stats-row { 
+            margin: 15px 0; 
+            padding: 10px; 
+            background: rgba(0, 0, 0, 0.4); 
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .stats-left { display: flex; gap: 20px; }
+        .stat-item { color: #ff0080; font-weight: bold; }
+        .date-item { color: #ff0080; font-style: italic; }
+        .actions-row { 
+            margin: 15px 0; 
+            display: flex; 
+            gap: 10px; 
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .download-btn { 
+            background: linear-gradient(45deg, #ff0080, #00ff00); 
+            border: none; 
+            color: #000; 
+            padding: 12px 20px; 
+            text-decoration: none; 
+            font-weight: bold; 
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: 'Courier New', monospace;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .download-btn:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 4px 15px rgba(255, 0, 128, 0.4);
+        }
+        .view-btn {
+            background: linear-gradient(45deg, #00bfff, #87ceeb);
+            color: #000;
+        }
+        .view-btn:hover {
+            box-shadow: 0 4px 15px rgba(0, 191, 255, 0.4);
+        }
+        .download-btn-green {
+            background: linear-gradient(45deg, #00ff00, #32cd32);
+            color: #000;
+        }
+        .download-btn-green:hover {
+            box-shadow: 0 4px 15px rgba(0, 255, 0, 0.4);
+        }
+        .like-btn {
+            background: linear-gradient(45deg, #ff1020, #ff0080);
+        }
+        .like-btn:hover {
+            box-shadow: 0 4px 15px rgba(255, 16, 32, 0.4);
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🔥 CTF PORTFOLIO 🔥</h1>
+        <h1>🔥 MALFUNC WRITEUP 🔥</h1>
         <div class="nav">
             <a href="/">🏠 HOME</a>
             <a href="/login">🔐 ADMIN</a>
@@ -214,7 +300,7 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
     if portfolios.is_empty() {
         html.push_str(r#"
         <div style="text-align: center; color: #ff0080; font-size: 1.5em; margin: 50px 0;">
-            <p>📂 NO CTF PORTFOLIOS YET</p>
+            <p>📂 NO CTF WRITEUPS YET</p>
         </div>
         "#);
     } else {
@@ -223,17 +309,18 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
         <div class="portfolio-item">
             <div class="portfolio-title">🎯 {}</div>
             <div class="portfolio-desc">{}</div>
-            <div style="margin: 15px 0;">
-                <span style="color: #ff0080;">❤️ {} likes</span>
-                <span style="color: #00ffff; margin-left: 15px;">👁️ {} views</span>
-                <span style="color: #ff0080; float: right;">📅 {}</span>
+            <div class="stats-row">
+                <div class="stats-left">
+                    <span class="stat-item">❤️ {} likes</span>
+                    <span class="stat-item">👁️ {} views</span>
+                </div>
+                <div class="date-item">📅 {}</div>
             </div>
-            <div style="margin: 10px 0;">
-                <a href="/view/{}" class="download-btn" style="margin-right: 10px;">👁️ VIEW PDF</a>
-                <a href="/download/{}" class="download-btn" style="margin-right: 10px;">📥 DOWNLOAD</a>
-                <button onclick="likePortfolio('{}')" class="download-btn" style="background: linear-gradient(45deg, #ff1020, #ff0080);">❤️ LIKE</button>
+            <div class="actions-row">
+                <a href="/view/{}" class="download-btn view-btn">👁️ VIEW PDF</a>
+                <a href="/download/{}" class="download-btn download-btn-green">📥 DOWNLOAD</a>
+                <button onclick="likePortfolio('{}')" class="download-btn like-btn">❤️ LIKE</button>
             </div>
-            <div style="clear: both;"></div>
         </div>
             "#, portfolio.title, portfolio.description, portfolio.likes, portfolio.views, portfolio.created_at.format("%Y-%m-%d"), portfolio.id, portfolio.pdf_filename, portfolio.id));
         }
@@ -275,7 +362,7 @@ async fn login_page() -> impl IntoResponse {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>🔐 Admin Login - CTF Portfolio</title>
+    <title>🔐 Admin Login - MalFunc Writeup</title>
     <style>
         body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; }
         .container { max-width: 400px; margin: 100px auto; background: rgba(0, 0, 0, 0.9); border: 2px solid #00ff00; border-radius: 10px; padding: 30px; }
@@ -304,7 +391,7 @@ async fn login_page() -> impl IntoResponse {
             <button type="submit">🚀 LOGIN</button>
         </form>
         <div class="nav">
-            <a href="/">← Back to Portfolio</a>
+            <a href="/">← Back to Writeup</a>
         </div>
     </div>
 </body>
@@ -323,7 +410,7 @@ async fn login(Form(form): Form<LoginForm>) -> impl IntoResponse {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>🔐 Admin Login - CTF Portfolio</title>
+    <title>🔐 Admin Login - MalFunc Writeup</title>
     <style>
         body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; }
         .container { max-width: 400px; margin: 100px auto; background: rgba(0, 0, 0, 0.9); border: 2px solid #00ff00; border-radius: 10px; padding: 30px; }
@@ -354,7 +441,7 @@ async fn login(Form(form): Form<LoginForm>) -> impl IntoResponse {
             <button type="submit">🚀 LOGIN</button>
         </form>
         <div class="nav">
-            <a href="/">← Back to Portfolio</a>
+            <a href="/">← Back to Writeup</a>
         </div>
     </div>
 </body>
@@ -381,18 +468,65 @@ async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>🔧 Admin Panel - CTF Portfolio</title>
+    <title>🔧 Admin Panel - MalFunc Writeup</title>
     <style>
         body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; border-radius: 10px; padding: 20px; }
-        h1 { text-align: center; color: #ff0080; font-size: 2.5em; }
+        .container { max-width: 1100px; margin: 0 auto; background: rgba(0, 0, 0, 0.8); border: 2px solid #00ff00; border-radius: 10px; padding: 20px; }
+        h1 { text-align: center; color: #ff0080; font-size: 2.5em; text-shadow: 0 0 10px #ff0080; }
         .nav { text-align: center; margin-bottom: 30px; padding: 10px; }
-        .nav a { color: #ffff00; text-decoration: none; margin: 0 15px; padding: 5px 10px; border: 1px solid #ffff00; border-radius: 3px; }
-        .portfolio-item { border: 2px solid #00ff00; margin: 20px 0; padding: 15px; background: rgba(0, 255, 0, 0.1); }
-        .portfolio-title { color: #ffff00; font-size: 1.4em; font-weight: bold; }
-        .portfolio-desc { color: #00ffff; margin: 10px 0; }
-        .delete-btn { background: #ff1020; border: none; color: #fff; padding: 5px 10px; font-family: 'Courier New', monospace; cursor: pointer; margin-top: 10px; }
-        .delete-btn:hover { background: #ff3040; }
+        .nav a { color: #ffff00; text-decoration: none; margin: 0 15px; padding: 8px 15px; border: 1px solid #ffff00; border-radius: 5px; transition: all 0.3s; }
+        .nav a:hover { background: #ffff00; color: #000; }
+        .portfolio-item { 
+            border: 2px solid #00ff00; 
+            margin: 25px 0; 
+            padding: 20px; 
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(0, 255, 0, 0.1), rgba(0, 255, 255, 0.05));
+            box-shadow: 0 4px 15px rgba(0, 255, 0, 0.3);
+        }
+        .portfolio-title { 
+            color: #ffff00; 
+            font-size: 1.6em; 
+            font-weight: bold; 
+            margin-bottom: 15px;
+            text-shadow: 0 0 5px #ffff00;
+        }
+        .portfolio-desc { 
+            color: #00ffff; 
+            margin: 15px 0; 
+            line-height: 1.6;
+            font-size: 1.1em;
+            white-space: pre-wrap;
+        }
+        .admin-stats { 
+            margin: 15px 0; 
+            padding: 15px; 
+            background: rgba(0, 0, 0, 0.4); 
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .stat-item { color: #ff0080; font-weight: bold; }
+        .delete-btn { 
+            background: #ff1020; 
+            border: none; 
+            color: #fff; 
+            padding: 8px 15px; 
+            font-family: 'Courier New', monospace; 
+            cursor: pointer; 
+            border-radius: 5px;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        .delete-btn:hover { 
+            background: #ff3040; 
+            transform: translateY(-2px);
+        }
+        .admin-actions {
+            margin-top: 15px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -400,7 +534,7 @@ async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
         <h1>🔧 ADMIN PANEL</h1>
         <div class="nav">
             <a href="/">🏠 HOME</a>
-            <a href="/admin/add">➕ ADD PORTFOLIO</a>
+            <a href="/admin/add">➕ ADD WRITEUP</a>
             <form method="post" action="/logout" style="display: inline;">
                 <button type="submit" style="background: #ff1020; border: none; color: #fff; padding: 5px 10px; font-family: 'Courier New', monospace; cursor: pointer;">🚪 LOGOUT</button>
             </form>
@@ -410,8 +544,8 @@ async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
     if portfolios.is_empty() {
         html.push_str(r#"
         <div style="text-align: center; color: #ff0080; font-size: 1.5em; margin: 50px 0;">
-            <p>📂 NO PORTFOLIOS YET</p>
-            <p><a href="/admin/add" style="color: #ffff00;">➕ ADD YOUR FIRST PORTFOLIO</a></p>
+            <p>📂 NO WRITEUPS YET</p>
+            <p><a href="/admin/add" style="color: #ffff00;">➕ ADD YOUR FIRST WRITEUP</a></p>
         </div>
         "#);
     } else {
@@ -450,7 +584,7 @@ async fn add_portfolio_page() -> impl IntoResponse {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>➕ Add Portfolio - CTF Admin</title>
+    <title>➕ Add Writeup - MalFunc Admin</title>
     <style>
         body { background: #000; color: #00ff00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; }
         .container { max-width: 600px; margin: 50px auto; background: rgba(0, 0, 0, 0.9); border: 2px solid #00ff00; border-radius: 10px; padding: 30px; }
@@ -472,7 +606,7 @@ async fn add_portfolio_page() -> impl IntoResponse {
             <a href="/admin">← Back to Admin</a> | 
             <a href="/">🏠 Home</a>
         </div>
-        <h1>➕ ADD NEW PORTFOLIO</h1>
+        <h1>➕ ADD NEW WRITEUP</h1>
         <form method="post" action="/admin/add" enctype="multipart/form-data">
             <div class="form-group">
                 <label for="title">🎯 Title:</label>
@@ -639,18 +773,36 @@ async fn view_pdf(
 async fn like_portfolio(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> impl IntoResponse {
+    let client_ip = addr.ip().to_string();
+    let rate_key = format!("{}:{}", client_ip, id);
+    
+    // Check rate limiting (5 menit = 300 detik)
+    if let Some(last_like_time) = state.rate_limiter.get(&rate_key) {
+        let now = Utc::now();
+        let elapsed = now.signed_duration_since(*last_like_time);
+        if elapsed.num_seconds() < 300 { // 5 menit
+            return (StatusCode::TOO_MANY_REQUESTS, "Rate limited: Wait 5 minutes before liking again").into_response();
+        }
+    }
+    
     // Increment like count
     let result = sqlx::query("UPDATE portfolios SET likes = likes + 1 WHERE id = ?")
         .bind(&id)
         .execute(&state.db)
         .await;
 
-    // Clear cache since like count changed
-    state.cache.remove("index");
-
     match result {
-        Ok(_) => StatusCode::OK.into_response(),
+        Ok(_) => {
+            // Update rate limiter
+            state.rate_limiter.insert(rate_key, Utc::now());
+            
+            // Clear cache since like count changed
+            state.cache.remove("index");
+            
+            StatusCode::OK.into_response()
+        }
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
