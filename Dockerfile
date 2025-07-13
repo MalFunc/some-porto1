@@ -43,8 +43,9 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/my-porto /app/
 COPY --from=builder /app/templates /app/templates
 
-# Create directories
-RUN mkdir -p uploads static
+# Create directories with proper permissions
+RUN mkdir -p uploads static data && \
+    chmod 755 uploads static data
 
 # Create non-root user
 RUN useradd -r -s /bin/false appuser && \

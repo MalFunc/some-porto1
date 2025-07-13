@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./uploads:/app/uploads
-      - ./database.db:/app/database.db
+      - ./data:/app/data
     environment:
       - RUST_LOG=info
     networks:
