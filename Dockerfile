@@ -1,5 +1,5 @@
 # Multi-stage build untuk optimasi ukuran  
-FROM rust:1.82-slim as builder
+FROM rust:1.81-slim as builder
 
 WORKDIR /app
 
