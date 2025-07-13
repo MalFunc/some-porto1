@@ -49,10 +49,11 @@ COPY ./data /app/data
 # Create non-root user first
 RUN useradd -r -s /bin/false appuser
 
-# Create directories with proper permissions
-RUN mkdir -p uploads static && \
+# Create directories and set proper ownership and permissions
+RUN mkdir -p uploads static data && \
     chown -R appuser:appuser /app && \
-    chmod -R 755 /app
+    chmod -R 755 /app && \
+    chmod -R 777 uploads
 
 USER appuser
 

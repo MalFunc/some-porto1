@@ -85,11 +85,17 @@ async fn main() -> anyhow::Result<()> {
     println!("🔧 DEBUG: Creating upload directories...");
     match fs::create_dir_all("uploads").await {
         Ok(_) => println!("✅ DEBUG: uploads directory created/exists"),
-        Err(e) => println!("❌ DEBUG: uploads directory error: {}", e),
+        Err(e) => {
+            println!("❌ DEBUG: uploads directory error: {}", e);
+            // Don't fail here, just log the error
+        }
     }
     match fs::create_dir_all("static").await {
         Ok(_) => println!("✅ DEBUG: static directory created/exists"),  
-        Err(e) => println!("❌ DEBUG: static directory error: {}", e),
+        Err(e) => {
+            println!("❌ DEBUG: static directory error: {}", e);
+            // Don't fail here, just log the error
+        }
     }
 
     let app = Router::new()
