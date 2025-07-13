@@ -1,9 +1,9 @@
 use axum::{
-    extract::{Multipart, Path, Query},
+    extract::{Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode, Response},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
-    Extension, Form, Router,
+    Form, Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePool, Row};
@@ -91,16 +91,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/download/:filename", get(download_pdf))
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
-        .layer(Extension(state))
+        .with_state(state)
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive());
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     println!("🚀 Server running on http://0.0.0.0:3000");
     
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 
@@ -130,7 +128,7 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
     Ok(db)
 }
 
-async fn index(Extension(state): Extension<AppState>) -> impl IntoResponse {
+async fn index(State(state): State<AppState>) -> impl IntoResponse {
     // Check cache first
     if let Some(cached) = state.cache.get("index") {
         if !cached.is_expired() {
@@ -312,7 +310,7 @@ async fn logout() -> impl IntoResponse {
     Redirect::to("/")
 }
 
-async fn admin_page(Extension(state): Extension<AppState>) -> impl IntoResponse {
+async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
     let portfolios = sqlx::query_as::<_, Portfolio>(
         "SELECT id, title, description, pdf_filename, created_at FROM portfolios ORDER BY created_at DESC"
     )
@@ -439,7 +437,7 @@ async fn add_portfolio_page() -> impl IntoResponse {
 }
 
 async fn add_portfolio(
-    Extension(state): Extension<AppState>,
+    State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     let mut title = String::new();
@@ -493,7 +491,7 @@ async fn add_portfolio(
 }
 
 async fn delete_portfolio(
-    Extension(state): Extension<AppState>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     // Get filename first to delete file
