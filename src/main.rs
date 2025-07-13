@@ -1,9 +1,9 @@
 use axum::{
-    extract::{Multipart, Path, Query, State},
+    extract::{Multipart, Path, Query},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
-    Form, Router,
+    Extension, Form, Router,
 };
 use askama::Template;
 use serde::{Deserialize, Serialize};
@@ -114,9 +114,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/download/:filename", get(download_pdf))
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
+        .layer(Extension(state))
         .layer(CompressionLayer::new())
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+        .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     println!("🚀 Server running on http://0.0.0.0:3000");
@@ -153,7 +153,7 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
     Ok(db)
 }
 
-async fn index(State(state): State<AppState>) -> impl IntoResponse {
+async fn index(Extension(state): Extension<AppState>) -> impl IntoResponse {
     // Check cache first
     if let Some(cached) = state.cache.get("index") {
         if !cached.is_expired() {
@@ -204,7 +204,7 @@ async fn logout() -> impl IntoResponse {
     Redirect::to("/")
 }
 
-async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
+async fn admin_page(Extension(state): Extension<AppState>) -> impl IntoResponse {
     let portfolios = sqlx::query_as::<_, Portfolio>(
         "SELECT id, title, description, pdf_filename, created_at FROM portfolios ORDER BY created_at DESC"
     )
@@ -222,7 +222,7 @@ async fn add_portfolio_page() -> impl IntoResponse {
 }
 
 async fn add_portfolio(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
     let mut title = String::new();
@@ -276,7 +276,7 @@ async fn add_portfolio(
 }
 
 async fn delete_portfolio(
-    State(state): State<AppState>,
+    Extension(state): Extension<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     // Get filename first to delete file
