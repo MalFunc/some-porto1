@@ -334,11 +334,14 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
                 const response = await fetch(`/like/${id}`, { method: 'POST' });
                 if (response.ok) {
                     location.reload(); // Refresh page to show new like count
+                } else if (response.status === 429) {
+                    alert('⏰ Please wait 5 minutes before liking again!');
                 } else {
-                    alert('Error liking portfolio');
+                    alert('❌ Error liking writeup');
                 }
             } catch (error) {
-                alert('Network error');
+                console.error('Network error:', error);
+                alert('🌐 Network error - please try again');
             }
         }
     </script>
@@ -638,41 +641,72 @@ async fn add_portfolio(
     let mut description = String::new();
     let mut pdf_filename = String::new();
 
-    while let Some(field) = multipart.next_field().await.unwrap() {
-        let name = field.name().unwrap().to_string();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = match field.name() {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
         
         match name.as_str() {
             "title" => {
-                title = field.text().await.unwrap();
+                match field.text().await {
+                    Ok(text) => title = text,
+                    Err(e) => {
+                        println!("❌ DEBUG: Error reading title: {}", e);
+                        return Html("Error reading title").into_response();
+                    }
+                }
             }
             "description" => {
-                description = field.text().await.unwrap();
+                match field.text().await {
+                    Ok(text) => description = text,
+                    Err(e) => {
+                        println!("❌ DEBUG: Error reading description: {}", e);
+                        return Html("Error reading description").into_response();
+                    }
+                }
             }
             "pdf" => {
                 if let Some(filename) = field.file_name() {
-                    let filename = filename.to_string(); // Clone filename first
-                    let data = field.bytes().await.unwrap();
-                    let uuid = Uuid::new_v4().to_string();
-                    pdf_filename = format!("{}_{}", uuid, filename);
-                    
-                    println!("🔧 DEBUG: Writing file to uploads/{}", pdf_filename);
-                    match fs::write(format!("uploads/{}", pdf_filename), data).await {
-                        Ok(_) => println!("✅ DEBUG: File written successfully"),
+                    let filename = filename.to_string();
+                    match field.bytes().await {
+                        Ok(data) => {
+                            let uuid = Uuid::new_v4().to_string();
+                            pdf_filename = format!("{}_{}", uuid, filename);
+                            
+                            println!("🔧 DEBUG: Writing file to uploads/{}", pdf_filename);
+                            match fs::write(format!("uploads/{}", pdf_filename), data).await {
+                                Ok(_) => println!("✅ DEBUG: File written successfully"),
+                                Err(e) => {
+                                    println!("❌ DEBUG: File write error: {}", e);
+                                    return Html("Error uploading file").into_response();
+                                }
+                            }
+                        }
                         Err(e) => {
-                            println!("❌ DEBUG: File write error: {}", e);
-                            return Html("Error uploading file").into_response();
+                            println!("❌ DEBUG: Error reading PDF bytes: {}", e);
+                            return Html("Error reading PDF file").into_response();
                         }
                     }
                 }
             }
-            _ => {}
+            _ => {
+                // Skip unknown fields
+                match field.bytes().await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        println!("❌ DEBUG: Error skipping field {}: {}", name, e);
+                        // Don't return error for unknown fields, just continue
+                    }
+                }
+            }
         }
     }
 
     if !title.is_empty() && !description.is_empty() && !pdf_filename.is_empty() {
         let id = Uuid::new_v4().to_string();
         
-        sqlx::query(
+        match sqlx::query(
             "INSERT INTO portfolios (id, title, description, pdf_filename) VALUES (?, ?, ?, ?)"
         )
         .bind(&id)
@@ -680,11 +714,21 @@ async fn add_portfolio(
         .bind(&description)
         .bind(&pdf_filename)
         .execute(&state.db)
-        .await
-        .unwrap();
-
-        // Clear cache
-        state.cache.remove("index");
+        .await {
+            Ok(_) => {
+                println!("✅ DEBUG: Portfolio added successfully");
+                // Clear cache
+                state.cache.remove("index");
+            }
+            Err(e) => {
+                println!("❌ DEBUG: Database error: {}", e);
+                return Html("Error saving to database").into_response();
+            }
+        }
+    } else {
+        println!("❌ DEBUG: Missing required fields - title: {}, desc: {}, pdf: {}", 
+                 !title.is_empty(), !description.is_empty(), !pdf_filename.is_empty());
+        return Html("Missing required fields").into_response();
     }
 
     Redirect::to("/admin").into_response()
