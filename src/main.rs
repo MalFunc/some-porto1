@@ -82,8 +82,15 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { db, cache };
 
     // Ensure upload directory exists
-    fs::create_dir_all("uploads").await?;
-    fs::create_dir_all("static").await?;
+    println!("🔧 DEBUG: Creating upload directories...");
+    match fs::create_dir_all("uploads").await {
+        Ok(_) => println!("✅ DEBUG: uploads directory created/exists"),
+        Err(e) => println!("❌ DEBUG: uploads directory error: {}", e),
+    }
+    match fs::create_dir_all("static").await {
+        Ok(_) => println!("✅ DEBUG: static directory created/exists"),  
+        Err(e) => println!("❌ DEBUG: static directory error: {}", e),
+    }
 
     let app = Router::new()
         .route("/", get(index))
@@ -113,7 +120,6 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
     let db_url = "sqlite::memory:";
     println!("🔧 DEBUG: Connecting to database: {}", db_url);
     let db = SqlitePool::connect(db_url).await?;
-    println!("✅ DEBUG: Database connected successfully");
     println!("✅ DEBUG: Database connected successfully");
     
     // Create table manually since SQLx 0.6 doesn't have migrate! macro
@@ -277,7 +283,7 @@ async fn login_page() -> impl IntoResponse {
 
 async fn login(Form(form): Form<LoginForm>) -> impl IntoResponse {
     // Simple hardcoded admin credentials (in production, use hashed passwords)
-    if form.username == "admin" && form.password == "admin123" {
+    if form.username == "admin" && form.password == "maliksigma" {
         Redirect::to("/admin").into_response()
     } else {
         let html = r#"
@@ -481,9 +487,14 @@ async fn add_portfolio(
                     let uuid = Uuid::new_v4().to_string();
                     pdf_filename = format!("{}_{}", uuid, filename);
                     
-                    fs::write(format!("uploads/{}", pdf_filename), data)
-                        .await
-                        .unwrap();
+                    println!("🔧 DEBUG: Writing file to uploads/{}", pdf_filename);
+                    match fs::write(format!("uploads/{}", pdf_filename), data).await {
+                        Ok(_) => println!("✅ DEBUG: File written successfully"),
+                        Err(e) => {
+                            println!("❌ DEBUG: File write error: {}", e);
+                            return Html("Error uploading file").into_response();
+                        }
+                    }
                 }
             }
             _ => {}

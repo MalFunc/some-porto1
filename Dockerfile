@@ -46,13 +46,13 @@ COPY --from=builder /app/templates /app/templates
 # Copy data directory if exists
 COPY ./data /app/data
 
+# Create non-root user first
+RUN useradd -r -s /bin/false appuser
+
 # Create directories with proper permissions
 RUN mkdir -p uploads static && \
-    chmod 755 uploads static data
-
-# Create non-root user
-RUN useradd -r -s /bin/false appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app
 
 USER appuser
 
