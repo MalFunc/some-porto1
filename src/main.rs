@@ -8,7 +8,7 @@ use axum::{
 use askama::Template;
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePool, Row};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
@@ -28,6 +28,15 @@ type Cache = Arc<DashMap<String, CacheEntry>>;
 struct CacheEntry {
     data: String,
     timestamp: DateTime<Utc>,
+    ttl: Duration,
+}
+
+impl CacheEntry {
+    fn is_expired(&self) -> bool {
+        let now = Utc::now();
+        let elapsed = now.signed_duration_since(self.timestamp);
+        elapsed.num_seconds() as u64 > self.ttl.as_secs()
+    }
 }
 
 #[derive(Clone)]
@@ -119,19 +128,8 @@ async fn main() -> anyhow::Result<()> {
 async fn setup_database() -> anyhow::Result<SqlitePool> {
     let db = SqlitePool::connect("sqlite:database.db").await?;
     
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS portfolios (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL,
-            pdf_filename TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-        "#,
-    )
-    .execute(&db)
-    .await?;
+    // Run migrations
+    sqlx::migrate!("./migrations").run(&db).await?;
 
     Ok(db)
 }
@@ -139,8 +137,10 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
     // Check cache first
     if let Some(cached) = state.cache.get("index") {
-        if Utc::now().signed_duration_since(cached.timestamp).num_seconds() < 300 {
+        if !cached.is_expired() {
             return Html(cached.data.clone());
+        } else {
+            state.cache.remove("index");
         }
     }
 
@@ -154,10 +154,11 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
     let template = IndexTemplate { portfolios };
     let html = template.render().unwrap();
     
-    // Cache the result
+    // Cache the result for 5 minutes
     state.cache.insert("index".to_string(), CacheEntry {
         data: html.clone(),
         timestamp: Utc::now(),
+        ttl: Duration::from_secs(300),
     });
 
     Html(html)

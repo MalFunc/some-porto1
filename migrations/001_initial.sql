@@ -1,4 +1,4 @@
--- Create portfolios table
+-- Initial schema for CTF Portfolio
 CREATE TABLE IF NOT EXISTS portfolios (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -6,3 +6,6 @@ CREATE TABLE IF NOT EXISTS portfolios (
     pdf_filename TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Create index for better query performance
+CREATE INDEX IF NOT EXISTS idx_portfolios_created_at ON portfolios(created_at DESC);

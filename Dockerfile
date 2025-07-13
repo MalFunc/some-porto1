@@ -11,8 +11,6 @@ RUN apt-get update && apt-get install -y \
 
 # Copy dependency files
 COPY Cargo.toml ./
-# Create Cargo.lock if not exists
-RUN touch Cargo.lock
 
 # Create dummy main.rs untuk cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
