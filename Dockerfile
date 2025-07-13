@@ -1,5 +1,5 @@
 # Multi-stage build untuk optimasi ukuran  
-FROM rust:1.83-slim as builder
+FROM rustlang/rust:nightly-slim as builder
 
 WORKDIR /app
 
@@ -15,8 +15,11 @@ COPY Cargo.toml ./
 # Create dummy main.rs untuk cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
+# Enable unstable features untuk edition2024
+ENV RUSTFLAGS="-Z unstable-options"
+
 # Build dependencies (akan di-cache) - Cargo akan generate Cargo.lock otomatis
-RUN cargo build --release && rm -rf src
+RUN cargo +nightly build --release && rm -rf src
 
 # Copy source code
 COPY src ./src
@@ -24,7 +27,7 @@ COPY templates ./templates
 COPY migrations ./migrations
 
 # Build aplikasi
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo +nightly build --release
 
 # Runtime stage
 FROM debian:bookworm-slim
