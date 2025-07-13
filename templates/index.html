@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>🔥 CTF Portfolio - Hacker Zone 🔥</title>
+    <style>
+        body {
+            background: #000;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            background-image: 
+                radial-gradient(circle at 20% 80%, rgba(0, 255, 0, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 0, 255, 0.1) 0%, transparent 50%);
+            min-height: 100vh;
+            animation: matrix 20s linear infinite;
+        }
+
+        @keyframes matrix {
+            0% { background-position: 0% 0%; }
+            100% { background-position: 100% 100%; }
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 20px #00ff00;
+        }
+
+        h1 {
+            text-align: center;
+            color: #ff0080;
+            text-shadow: 2px 2px 4px #000;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from { text-shadow: 2px 2px 4px #000, 0 0 10px #ff0080; }
+            to { text-shadow: 2px 2px 4px #000, 0 0 20px #ff0080, 0 0 30px #ff0080; }
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #00ffff;
+            font-size: 1.2em;
+            margin-bottom: 30px;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+
+        .nav {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 10px;
+            border: 1px solid #00ff00;
+            background: rgba(0, 255, 0, 0.1);
+        }
+
+        .nav a {
+            color: #ffff00;
+            text-decoration: none;
+            margin: 0 15px;
+            padding: 5px 10px;
+            border: 1px solid #ffff00;
+            background: rgba(255, 255, 0, 0.1);
+            transition: all 0.3s;
+        }
+
+        .nav a:hover {
+            background: #ffff00;
+            color: #000;
+            box-shadow: 0 0 10px #ffff00;
+        }
+
+        .portfolio-item {
+            border: 2px solid #00ff00;
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(0, 255, 0, 0.05);
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .portfolio-item:hover {
+            border-color: #ff0080;
+            box-shadow: 0 0 15px rgba(255, 0, 128, 0.5);
+            transform: translateX(5px);
+        }
+
+        .portfolio-title {
+            color: #ffff00;
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .portfolio-desc {
+            color: #00ffff;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .portfolio-date {
+            color: #ff0080;
+            font-size: 0.9em;
+            float: right;
+        }
+
+        .download-btn {
+            background: linear-gradient(45deg, #ff0080, #00ff00);
+            border: none;
+            color: #000;
+            padding: 8px 15px;
+            text-decoration: none;
+            font-weight: bold;
+            border-radius: 5px;
+            transition: all 0.3s;
+            text-transform: uppercase;
+        }
+
+        .download-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 50px;
+            padding: 20px;
+            border-top: 2px solid #00ff00;
+            color: #888;
+        }
+
+        .matrix-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0.1;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .hacker-text {
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="matrix-bg"></div>
+    
+    <div class="container">
+        <h1>🔥 CTF PORTFOLIO 🔥</h1>
+        <div class="subtitle">>>> HACKER CHRONICLES <<<</div>
+        
+        <div class="nav">
+            <a href="/">🏠 HOME</a>
+            <a href="/login">🔐 ADMIN</a>
+        </div>
+
+        {% if portfolios.is_empty() %}
+            <div style="text-align: center; color: #ff0080; font-size: 1.5em; margin: 50px 0;">
+                <p>📂 NO CTF PORTFOLIOS YET</p>
+                <p style="font-size: 0.8em; color: #00ffff;">>>> HACKING IN PROGRESS... <<<</p>
+            </div>
+        {% else %}
+            {% for portfolio in portfolios %}
+            <div class="portfolio-item">
+                <div class="portfolio-title">🎯 {{ portfolio.title }}</div>
+                <div class="portfolio-desc">{{ portfolio.description }}</div>
+                <div>
+                    <a href="/download/{{ portfolio.pdf_filename }}" class="download-btn">
+                        📥 DOWNLOAD PDF
+                    </a>
+                    <span class="portfolio-date">
+                        📅 {{ portfolio.created_at.format("%Y-%m-%d %H:%M") }}
+                    </span>
+                </div>
+                <div style="clear: both;"></div>
+            </div>
+            {% endfor %}
+        {% endif %}
+        
+        <div class="footer">
+            <p class="hacker-text">>>> POWERED BY RUST & CAFFEINE <<<</p>
+            <p style="font-size: 0.8em;">🔥 FAST • SECURE • RETRO 🔥</p>
+        </div>
+    </div>
+
+    <script>
+        // Simple matrix effect
+        function createMatrix() {
+            const canvas = document.createElement('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            canvas.style.position = 'fixed';
+            canvas.style.top = '0';
+            canvas.style.left = '0';
+            canvas.style.zIndex = '-1';
+            canvas.style.opacity = '0.1';
+            document.body.appendChild(canvas);
+
+            const ctx = canvas.getContext('2d');
+            const matrix = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789@#$%^&*()*&^%+-/~{[|`]}";
+            const matrixArray = matrix.split("");
+
+            const font_size = 10;
+            const columns = canvas.width / font_size;
+            const drops = [];
+
+            for(let x = 0; x < columns; x++) {
+                drops[x] = 1;
+            }
+
+            function draw() {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.04)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = '#00ff00';
+                ctx.font = font_size + 'px courier';
+
+                for(let i = 0; i < drops.length; i++) {
+                    const text = matrixArray[Math.floor(Math.random() * matrixArray.length)];
+                    ctx.fillText(text, i * font_size, drops[i] * font_size);
+
+                    if(drops[i] * font_size > canvas.height && Math.random() > 0.975) {
+                        drops[i] = 0;
+                    }
+                    drops[i]++;
+                }
+            }
+
+            setInterval(draw, 35);
+        }
+
+        createMatrix();
+    </script>
+</body>
+</html>

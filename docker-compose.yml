@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: ctf-portfolio
+    restart: unless-stopped
+    volumes:
+      - ./uploads:/app/uploads
+      - ./database.db:/app/database.db
+    environment:
+      - RUST_LOG=info
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ctf-portfolio.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.ctf-portfolio.entrypoints=websecure"
+      - "traefik.http.routers.ctf-portfolio.tls.certresolver=letsencrypt"
+      - "traefik.http.services.ctf-portfolio.loadbalancer.server.port=3000"
+      # Redirect HTTP to HTTPS
+      - "traefik.http.routers.ctf-portfolio-http.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.ctf-portfolio-http.entrypoints=web"
+      - "traefik.http.routers.ctf-portfolio-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`traefik.${DOMAIN}`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+
+networks:
+  web:
+    external: false

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>➕ Add New CTF - Admin Panel</title>
+    <style>
+        body {
+            background: #000;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            margin: 0;
+            padding: 20px;
+            background-image: 
+                radial-gradient(circle at 20% 80%, rgba(0, 255, 0, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 0, 255, 0.1) 0%, transparent 50%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 0 20px #00ff00;
+        }
+
+        h1 {
+            text-align: center;
+            color: #ff0080;
+            text-shadow: 2px 2px 4px #000;
+            font-size: 2.2em;
+            margin-bottom: 30px;
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from { text-shadow: 2px 2px 4px #000, 0 0 10px #ff0080; }
+            to { text-shadow: 2px 2px 4px #000, 0 0 20px #ff0080, 0 0 30px #ff0080; }
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            color: #00ffff;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 15px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            font-size: 1em;
+            border-radius: 5px;
+            box-sizing: border-box;
+            transition: all 0.3s;
+        }
+
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #ff0080;
+            box-shadow: 0 0 15px rgba(255, 0, 128, 0.5);
+            background: rgba(255, 0, 128, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .file-input-label {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            background: rgba(255, 255, 0, 0.1);
+            border: 2px dashed #ffff00;
+            color: #ffff00;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.3s;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .file-input-label:hover {
+            background: rgba(255, 255, 0, 0.2);
+            border-style: solid;
+            box-shadow: 0 0 10px rgba(255, 255, 0, 0.3);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(45deg, #00ff00, #00ffff);
+            border: none;
+            color: #000;
+            font-weight: bold;
+            font-size: 1.3em;
+            border-radius: 5px;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: all 0.3s;
+            margin-top: 20px;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0, 255, 255, 0.4);
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .nav-links a {
+            color: #ffff00;
+            text-decoration: none;
+            margin: 0 15px;
+            padding: 8px 15px;
+            border: 1px solid #ffff00;
+            border-radius: 3px;
+            transition: all 0.3s;
+        }
+
+        .nav-links a:hover {
+            background: #ffff00;
+            color: #000;
+        }
+
+        .requirements {
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            color: #00ffff;
+        }
+
+        .requirements h3 {
+            margin-top: 0;
+            color: #ffff00;
+        }
+
+        .requirements ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .file-selected {
+            color: #00ff00;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>➕ ADD NEW CTF</h1>
+        
+        <div class="nav-links">
+            <a href="/admin">⬅️ Back to Admin</a>
+            <a href="/">🏠 Home</a>
+        </div>
+
+        <div class="requirements">
+            <h3>📋 REQUIREMENTS:</h3>
+            <ul>
+                <li>📝 Enter a descriptive title for your CTF writeup</li>
+                <li>📄 Provide detailed description/summary</li>
+                <li>📁 Upload PDF file (max 50MB recommended)</li>
+                <li>🎯 Make sure PDF contains your CTF solution/writeup</li>
+            </ul>
+        </div>
+        
+        <form method="post" action="/admin/add" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="title">🎯 CTF Title:</label>
+                <input type="text" id="title" name="title" required 
+                       placeholder="e.g., HackTheBox - Precious Writeup">
+            </div>
+            
+            <div class="form-group">
+                <label for="description">📝 Description:</label>
+                <textarea id="description" name="description" required 
+                          placeholder="Describe the challenge, techniques used, difficulty level, tools, etc..."></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="pdf_file">📄 PDF Writeup:</label>
+                <div class="file-input-wrapper">
+                    <input type="file" id="pdf_file" name="pdf_file" accept=".pdf" required class="file-input">
+                    <label for="pdf_file" class="file-input-label">
+                        📁 CLICK TO SELECT PDF FILE
+                    </label>
+                </div>
+                <div id="file-selected" class="file-selected" style="display: none;"></div>
+            </div>
+            
+            <button type="submit" class="submit-btn">🚀 UPLOAD CTF PORTFOLIO</button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('pdf_file').addEventListener('change', function(e) {
+            const fileSelected = document.getElementById('file-selected');
+            const label = document.querySelector('.file-input-label');
+            
+            if (e.target.files.length > 0) {
+                const fileName = e.target.files[0].name;
+                const fileSize = (e.target.files[0].size / 1024 / 1024).toFixed(2);
+                
+                label.textContent = '✅ FILE SELECTED';
+                label.style.borderColor = '#00ff00';
+                label.style.color = '#00ff00';
+                
+                fileSelected.innerHTML = `📁 ${fileName} (${fileSize} MB)`;
+                fileSelected.style.display = 'block';
+            } else {
+                label.textContent = '📁 CLICK TO SELECT PDF FILE';
+                label.style.borderColor = '#ffff00';
+                label.style.color = '#ffff00';
+                fileSelected.style.display = 'none';
+            }
+        });
+
+        // Form validation
+        document.querySelector('form').addEventListener('submit', function(e) {
+            const title = document.getElementById('title').value.trim();
+            const description = document.getElementById('description').value.trim();
+            const file = document.getElementById('pdf_file').files[0];
+
+            if (!title || !description || !file) {
+                e.preventDefault();
+                alert('❌ Please fill all fields and select a PDF file!');
+                return false;
+            }
+
+            if (file.type !== 'application/pdf') {
+                e.preventDefault();
+                alert('❌ Please select a valid PDF file!');
+                return false;
+            }
+
+            if (file.size > 50 * 1024 * 1024) { // 50MB
+                e.preventDefault();
+                alert('❌ File size too large! Please use a file smaller than 50MB.');
+                return false;
+            }
+
+            // Show loading state
+            const btn = document.querySelector('.submit-btn');
+            btn.textContent = '🔄 UPLOADING...';
+            btn.disabled = true;
+        });
+    </script>
+</body>
+</html>
