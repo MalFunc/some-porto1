@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path, State, ConnectInfo},
+    extract::{Multipart, Path, State, ConnectInfo, DefaultBodyLimit},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
@@ -12,6 +12,7 @@ use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
     cors::CorsLayer,
+    timeout::TimeoutLayer,
 };
 use dashmap::DashMap;
 use tokio::fs;
@@ -123,6 +124,8 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
+        .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB limit
+        .layer(TimeoutLayer::new(Duration::from_secs(300))) // 5 minute timeout
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive());
 
@@ -641,67 +644,106 @@ async fn add_portfolio(
     let mut description = String::new();
     let mut pdf_filename = String::new();
 
-    while let Ok(Some(field)) = multipart.next_field().await {
-        let name = match field.name() {
-            Some(name) => name.to_string(),
-            None => continue,
-        };
-        
-        match name.as_str() {
-            "title" => {
-                match field.text().await {
-                    Ok(text) => title = text,
-                    Err(e) => {
-                        println!("❌ DEBUG: Error reading title: {}", e);
-                        return Html("Error reading title").into_response();
+    println!("🔧 DEBUG: Starting multipart processing...");
+
+    // Use a more careful approach to handle multipart
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                let name = match field.name() {
+                    Some(name) => name.to_string(),
+                    None => {
+                        println!("⚠️ DEBUG: Field with no name, skipping...");
+                        // Try to consume the field anyway
+                        let _ = field.bytes().await;
+                        continue;
                     }
-                }
-            }
-            "description" => {
-                match field.text().await {
-                    Ok(text) => description = text,
-                    Err(e) => {
-                        println!("❌ DEBUG: Error reading description: {}", e);
-                        return Html("Error reading description").into_response();
-                    }
-                }
-            }
-            "pdf" => {
-                if let Some(filename) = field.file_name() {
-                    let filename = filename.to_string();
-                    match field.bytes().await {
-                        Ok(data) => {
-                            let uuid = Uuid::new_v4().to_string();
-                            pdf_filename = format!("{}_{}", uuid, filename);
-                            
-                            println!("🔧 DEBUG: Writing file to uploads/{}", pdf_filename);
-                            match fs::write(format!("uploads/{}", pdf_filename), data).await {
-                                Ok(_) => println!("✅ DEBUG: File written successfully"),
-                                Err(e) => {
-                                    println!("❌ DEBUG: File write error: {}", e);
-                                    return Html("Error uploading file").into_response();
-                                }
+                };
+                
+                println!("🔧 DEBUG: Processing field: {}", name);
+                
+                match name.as_str() {
+                    "title" => {
+                        match field.text().await {
+                            Ok(text) => {
+                                title = text;
+                                println!("✅ DEBUG: Title received: {}", title);
+                            },
+                            Err(e) => {
+                                println!("❌ DEBUG: Error reading title: {}", e);
+                                return Html("Error reading title").into_response();
                             }
                         }
-                        Err(e) => {
-                            println!("❌ DEBUG: Error reading PDF bytes: {}", e);
-                            return Html("Error reading PDF file").into_response();
+                    }
+                    "description" => {
+                        match field.text().await {
+                            Ok(text) => {
+                                description = text;
+                                println!("✅ DEBUG: Description received ({} chars)", description.len());
+                            },
+                            Err(e) => {
+                                println!("❌ DEBUG: Error reading description: {}", e);
+                                return Html("Error reading description").into_response();
+                            }
+                        }
+                    }
+                    "pdf" => {
+                        if let Some(filename) = field.file_name() {
+                            let filename = filename.to_string();
+                            println!("🔧 DEBUG: Processing PDF file: {}", filename);
+                            
+                            match field.bytes().await {
+                                Ok(data) => {
+                                    println!("✅ DEBUG: PDF data received ({} bytes)", data.len());
+                                    let uuid = Uuid::new_v4().to_string();
+                                    pdf_filename = format!("{}_{}", uuid, filename);
+                                    
+                                    println!("🔧 DEBUG: Writing file to uploads/{}", pdf_filename);
+                                    match fs::write(format!("uploads/{}", pdf_filename), data).await {
+                                        Ok(_) => println!("✅ DEBUG: File written successfully"),
+                                        Err(e) => {
+                                            println!("❌ DEBUG: File write error: {}", e);
+                                            return Html("Error uploading file").into_response();
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("❌ DEBUG: Error reading PDF bytes: {}", e);
+                                    return Html("Error reading PDF file").into_response();
+                                }
+                            }
+                        } else {
+                            // No filename, consume the field anyway
+                            let _ = field.bytes().await;
+                            println!("⚠️ DEBUG: PDF field with no filename");
+                        }
+                    }
+                    _ => {
+                        // Skip unknown fields
+                        println!("⚠️ DEBUG: Unknown field '{}', skipping...", name);
+                        match field.bytes().await {
+                            Ok(_) => {},
+                            Err(e) => {
+                                println!("❌ DEBUG: Error skipping field {}: {}", name, e);
+                                // Don't return error for unknown fields, just continue
+                            }
                         }
                     }
                 }
             }
-            _ => {
-                // Skip unknown fields
-                match field.bytes().await {
-                    Ok(_) => {},
-                    Err(e) => {
-                        println!("❌ DEBUG: Error skipping field {}: {}", name, e);
-                        // Don't return error for unknown fields, just continue
-                    }
-                }
+            Ok(None) => {
+                println!("✅ DEBUG: Finished processing all fields");
+                break;
+            }
+            Err(e) => {
+                println!("❌ DEBUG: Error getting next field: {}", e);
+                return Html(format!("Error processing upload: {}", e)).into_response();
             }
         }
     }
+
+    println!("🔧 DEBUG: Validation - title: '{}', desc length: {}, pdf: '{}'", 
+             title, description.len(), pdf_filename);
 
     if !title.is_empty() && !description.is_empty() && !pdf_filename.is_empty() {
         let id = Uuid::new_v4().to_string();
@@ -716,7 +758,7 @@ async fn add_portfolio(
         .execute(&state.db)
         .await {
             Ok(_) => {
-                println!("✅ DEBUG: Portfolio added successfully");
+                println!("✅ DEBUG: Portfolio added successfully with ID: {}", id);
                 // Clear cache
                 state.cache.remove("index");
             }
@@ -726,9 +768,9 @@ async fn add_portfolio(
             }
         }
     } else {
-        println!("❌ DEBUG: Missing required fields - title: {}, desc: {}, pdf: {}", 
-                 !title.is_empty(), !description.is_empty(), !pdf_filename.is_empty());
-        return Html("Missing required fields").into_response();
+        println!("❌ DEBUG: Missing required fields - title: '{}', desc: '{}', pdf: '{}'", 
+                 title, description, pdf_filename);
+        return Html("Missing required fields. Please fill all fields and select a PDF file.").into_response();
     }
 
     Redirect::to("/admin").into_response()
