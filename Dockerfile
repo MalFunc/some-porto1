@@ -1,4 +1,4 @@
-# Multi-stage build untuk optimasi ukuran
+# Multi-stage build untuk optimasi ukuran  
 FROM rust:1.75-slim as builder
 
 WORKDIR /app
@@ -15,7 +15,7 @@ COPY Cargo.toml ./
 # Create dummy main.rs untuk cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies (akan di-cache)
+# Build dependencies (akan di-cache) - Cargo akan generate Cargo.lock otomatis
 RUN cargo build --release && rm -rf src
 
 # Copy source code

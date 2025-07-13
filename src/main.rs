@@ -8,7 +8,7 @@ use axum::{
 use askama::Template;
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePool, Row};
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration, net::SocketAddr};
 use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
@@ -118,18 +118,37 @@ async fn main() -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     println!("🚀 Server running on http://0.0.0.0:3000");
     
-    axum::serve(listener, app).await?;
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await?;
     Ok(())
 }
 
 async fn setup_database() -> anyhow::Result<SqlitePool> {
     let db = SqlitePool::connect("sqlite:database.db").await?;
     
-    // Run migrations
-    sqlx::migrate!("./migrations").run(&db).await?;
+    // Create table manually since SQLx 0.6 doesn't have migrate! macro
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            pdf_filename TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+    )
+    .execute(&db)
+    .await?;
+
+    // Create index for better performance
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_portfolios_created_at ON portfolios(created_at DESC)")
+        .execute(&db)
+        .await?;
 
     Ok(db)
 }
