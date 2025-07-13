@@ -46,16 +46,13 @@ COPY --from=builder /app/templates /app/templates
 # Copy data directory if exists
 COPY ./data /app/data
 
-# Create non-root user first
-RUN useradd -r -s /bin/false appuser
-
-# Create directories and set proper ownership and permissions
+# Create directories with full permissions for testing
 RUN mkdir -p uploads static data && \
-    chown -R appuser:appuser /app && \
-    chmod -R 755 /app && \
-    chmod -R 777 uploads
+    chmod 777 uploads static && \
+    chmod 755 data
 
-USER appuser
+# For now, run as root to avoid permission issues
+# USER appuser
 
 EXPOSE 3000
 
