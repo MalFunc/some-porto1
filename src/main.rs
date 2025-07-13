@@ -333,7 +333,7 @@ async fn login(Form(form): Form<LoginForm>) -> impl IntoResponse {
 }
 
 async fn logout() -> impl IntoResponse {
-    Redirect::to("/")
+    Redirect::to("/").into_response()
 }
 
 async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
@@ -519,7 +519,7 @@ async fn add_portfolio(
         state.cache.remove("index");
     }
 
-    Redirect::to("/admin")
+    Redirect::to("/admin").into_response()
 }
 
 async fn delete_portfolio(
@@ -545,7 +545,7 @@ async fn delete_portfolio(
     // Clear cache
     state.cache.remove("index");
 
-    Redirect::to("/admin")
+    Redirect::to("/admin").into_response()
 }
 
 async fn download_pdf(Path(filename): Path<String>) -> impl IntoResponse {
