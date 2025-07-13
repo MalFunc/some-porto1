@@ -103,10 +103,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn setup_database() -> anyhow::Result<SqlitePool> {
-    // Create data directory if it doesn't exist
-    fs::create_dir_all("data").await?;
-    
-    let db = SqlitePool::connect("sqlite:data/database.db").await?;
+    // Use in-memory database for now to avoid permission issues
+    let db = SqlitePool::connect("sqlite::memory:").await?;
     
     // Create table manually since SQLx 0.6 doesn't have migrate! macro
     sqlx::query(
