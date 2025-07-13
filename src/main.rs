@@ -82,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/", get(index))
+        .route("/health", get(health_check))
         .route("/admin", get(admin_page))
         .route("/login", get(login_page).post(login))
         .route("/logout", post(logout))
@@ -125,6 +126,10 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
         .await?;
 
     Ok(db)
+}
+
+async fn health_check() -> impl IntoResponse {
+    "OK"
 }
 
 async fn index(State(state): State<AppState>) -> impl IntoResponse {
@@ -453,7 +458,7 @@ async fn add_portfolio(
             "description" => {
                 description = field.text().await.unwrap();
             }
-            "pdf_file" => {
+            "pdf" => {
                 if let Some(filename) = field.file_name() {
                     let filename = filename.to_string(); // Clone filename first
                     let data = field.bytes().await.unwrap();
