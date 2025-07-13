@@ -1,13 +1,13 @@
 use axum::{
-    extract::{Multipart, Path, Query, State},
-    http::{HeaderMap, StatusCode, Response},
+    extract::{Multipart, Path, State},
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
     Form, Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqlitePool, Row};
-use std::{sync::Arc, time::Duration, net::SocketAddr};
+use std::{sync::Arc, time::Duration};
 use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
@@ -17,7 +17,6 @@ use dashmap::DashMap;
 use tokio::fs;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
-use anyhow::Result;
 use tracing_subscriber;
 
 // Cache untuk performa
@@ -67,7 +66,7 @@ struct PortfolioForm {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::init();
+    tracing_subscriber::fmt::init();
 
     // Setup database
     let db = setup_database().await?;
@@ -456,6 +455,7 @@ async fn add_portfolio(
             }
             "pdf_file" => {
                 if let Some(filename) = field.file_name() {
+                    let filename = filename.to_string(); // Clone filename first
                     let data = field.bytes().await.unwrap();
                     let uuid = Uuid::new_v4().to_string();
                     pdf_filename = format!("{}_{}", uuid, filename);
