@@ -43,8 +43,11 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/my-porto /app/
 COPY --from=builder /app/templates /app/templates
 
+# Copy data directory if exists
+COPY ./data /app/data
+
 # Create directories with proper permissions
-RUN mkdir -p uploads static data && \
+RUN mkdir -p uploads static && \
     chmod 755 uploads static data
 
 # Create non-root user
