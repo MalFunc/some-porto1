@@ -12,7 +12,6 @@ use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
     cors::CorsLayer,
-    timeout::TimeoutLayer,
 };
 use dashmap::DashMap;
 use tokio::fs;
@@ -125,7 +124,6 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB limit
-        .layer(TimeoutLayer::new(Duration::from_secs(300))) // 5 minute timeout
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive());
 
@@ -837,7 +835,7 @@ async fn view_pdf(
         .await
     {
         let filename: String = row.get("pdf_filename");
-        let title: String = row.get("title");
+        let _title: String = row.get("title");
         
         match fs::read(format!("uploads/{}", filename)).await {
             Ok(data) => {
