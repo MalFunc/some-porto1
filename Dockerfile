@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
+# Create Cargo.lock if not exists
+RUN touch Cargo.lock
 
 # Create dummy main.rs untuk cache dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
@@ -21,6 +23,7 @@ RUN cargo build --release && rm -rf src
 # Copy source code
 COPY src ./src
 COPY templates ./templates
+COPY migrations ./migrations
 
 # Build aplikasi
 RUN touch src/main.rs && cargo build --release
