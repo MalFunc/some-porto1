@@ -49,6 +49,8 @@ struct Portfolio {
     title: String,
     description: String,
     pdf_filename: String,
+    likes: i64,
+    views: i64,
     created_at: DateTime<Utc>,
 }
 
@@ -107,6 +109,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/add", get(add_portfolio_page).post(add_portfolio))
         .route("/admin/delete/:id", post(delete_portfolio))
         .route("/download/:filename", get(download_pdf))
+        .route("/view/:id", get(view_pdf))
+        .route("/like/:id", post(like_portfolio))
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
@@ -137,6 +141,8 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
             title TEXT NOT NULL,
             description TEXT NOT NULL,
             pdf_filename TEXT NOT NULL,
+            likes INTEGER DEFAULT 0,
+            views INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         "#,
@@ -171,7 +177,7 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
     }
 
     let portfolios = sqlx::query_as::<_, Portfolio>(
-        "SELECT id, title, description, pdf_filename, created_at FROM portfolios ORDER BY created_at DESC"
+        "SELECT id, title, description, pdf_filename, likes, views, created_at FROM portfolios ORDER BY created_at DESC"
     )
     .fetch_all(&state.db)
     .await
@@ -217,18 +223,38 @@ async fn index(State(state): State<AppState>) -> impl IntoResponse {
         <div class="portfolio-item">
             <div class="portfolio-title">🎯 {}</div>
             <div class="portfolio-desc">{}</div>
-            <div>
-                <a href="/download/{}" class="download-btn">📥 DOWNLOAD PDF</a>
+            <div style="margin: 15px 0;">
+                <span style="color: #ff0080;">❤️ {} likes</span>
+                <span style="color: #00ffff; margin-left: 15px;">👁️ {} views</span>
                 <span style="color: #ff0080; float: right;">📅 {}</span>
+            </div>
+            <div style="margin: 10px 0;">
+                <a href="/view/{}" class="download-btn" style="margin-right: 10px;">👁️ VIEW PDF</a>
+                <a href="/download/{}" class="download-btn" style="margin-right: 10px;">📥 DOWNLOAD</a>
+                <button onclick="likePortfolio('{}')" class="download-btn" style="background: linear-gradient(45deg, #ff1020, #ff0080);">❤️ LIKE</button>
             </div>
             <div style="clear: both;"></div>
         </div>
-            "#, portfolio.title, portfolio.description, portfolio.pdf_filename, portfolio.created_at.format("%Y-%m-%d")));
+            "#, portfolio.title, portfolio.description, portfolio.likes, portfolio.views, portfolio.created_at.format("%Y-%m-%d"), portfolio.id, portfolio.pdf_filename, portfolio.id));
         }
     }
 
     html.push_str(r#"
     </div>
+    <script>
+        async function likePortfolio(id) {
+            try {
+                const response = await fetch(`/like/${id}`, { method: 'POST' });
+                if (response.ok) {
+                    location.reload(); // Refresh page to show new like count
+                } else {
+                    alert('Error liking portfolio');
+                }
+            } catch (error) {
+                alert('Network error');
+            }
+        }
+    </script>
 </body>
 </html>
     "#);
@@ -344,7 +370,7 @@ async fn logout() -> impl IntoResponse {
 
 async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
     let portfolios = sqlx::query_as::<_, Portfolio>(
-        "SELECT id, title, description, pdf_filename, created_at FROM portfolios ORDER BY created_at DESC"
+        "SELECT id, title, description, pdf_filename, likes, views, created_at FROM portfolios ORDER BY created_at DESC"
     )
     .fetch_all(&state.db)
     .await
@@ -394,16 +420,18 @@ async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
         <div class="portfolio-item">
             <div class="portfolio-title">🎯 {}</div>
             <div class="portfolio-desc">{}</div>
-            <div>
-                <span style="color: #ff0080;">📅 {}</span>
-                <span style="color: #00ffff; margin-left: 20px;">📄 {}</span>
+            <div style="margin: 10px 0;">
+                <span style="color: #ff0080;">❤️ {} likes</span>
+                <span style="color: #00ffff; margin-left: 15px;">�️ {} views</span>
+                <span style="color: #ff0080; margin-left: 15px;">�📅 {}</span>
+                <span style="color: #00ffff; margin-left: 15px;">📄 {}</span>
                 <form method="post" action="/admin/delete/{}" style="display: inline; float: right;">
                     <button type="submit" class="delete-btn" onclick="return confirm('Are you sure?')">🗑️ DELETE</button>
                 </form>
             </div>
             <div style="clear: both;"></div>
         </div>
-            "#, portfolio.title, portfolio.description, portfolio.created_at.format("%Y-%m-%d"), portfolio.pdf_filename, portfolio.id));
+            "#, portfolio.title, portfolio.description, portfolio.likes, portfolio.views, portfolio.created_at.format("%Y-%m-%d"), portfolio.pdf_filename, portfolio.id));
         }
     }
 
@@ -565,6 +593,64 @@ async fn download_pdf(Path(filename): Path<String>) -> impl IntoResponse {
             );
             (StatusCode::OK, headers, data).into_response()
         }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn view_pdf(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    // Increment view count
+    let _ = sqlx::query("UPDATE portfolios SET views = views + 1 WHERE id = ?")
+        .bind(&id)
+        .execute(&state.db)
+        .await;
+
+    // Clear cache since view count changed
+    state.cache.remove("index");
+
+    // Get portfolio info
+    if let Ok(row) = sqlx::query("SELECT pdf_filename, title FROM portfolios WHERE id = ?")
+        .bind(&id)
+        .fetch_one(&state.db)
+        .await
+    {
+        let filename: String = row.get("pdf_filename");
+        let title: String = row.get("title");
+        
+        match fs::read(format!("uploads/{}", filename)).await {
+            Ok(data) => {
+                let mut headers = HeaderMap::new();
+                headers.insert("Content-Type", "application/pdf".parse().unwrap());
+                headers.insert(
+                    "Content-Disposition",
+                    format!("inline; filename=\"{}\"", filename).parse().unwrap(),
+                );
+                (StatusCode::OK, headers, data).into_response()
+            }
+            Err(_) => StatusCode::NOT_FOUND.into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+async fn like_portfolio(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    // Increment like count
+    let result = sqlx::query("UPDATE portfolios SET likes = likes + 1 WHERE id = ?")
+        .bind(&id)
+        .execute(&state.db)
+        .await;
+
+    // Clear cache since like count changed
+    state.cache.remove("index");
+
+    match result {
+        Ok(_) => StatusCode::OK.into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
