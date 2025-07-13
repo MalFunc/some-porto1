@@ -67,12 +67,17 @@ struct PortfolioForm {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+    println!("🚀 DEBUG: Starting CTF Portfolio application...");
 
     // Setup database
+    println!("🔧 DEBUG: Setting up database...");
     let db = setup_database().await?;
+    println!("✅ DEBUG: Database setup completed");
     
     // Setup cache
+    println!("🔧 DEBUG: Setting up cache...");
     let cache = Arc::new(DashMap::new());
+    println!("✅ DEBUG: Cache setup completed");
     
     let state = AppState { db, cache };
 
@@ -97,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     println!("🚀 Server running on http://0.0.0.0:3000");
+    println!("✅ DEBUG: Application fully initialized, starting web server...");
     
     axum::serve(listener, app).await?;
     Ok(())
@@ -104,9 +110,14 @@ async fn main() -> anyhow::Result<()> {
 
 async fn setup_database() -> anyhow::Result<SqlitePool> {
     // Use in-memory database for now to avoid permission issues
-    let db = SqlitePool::connect("sqlite::memory:").await?;
+    let db_url = "sqlite::memory:";
+    println!("🔧 DEBUG: Connecting to database: {}", db_url);
+    let db = SqlitePool::connect(db_url).await?;
+    println!("✅ DEBUG: Database connected successfully");
+    println!("✅ DEBUG: Database connected successfully");
     
     // Create table manually since SQLx 0.6 doesn't have migrate! macro
+    println!("🔧 DEBUG: Creating tables...");
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS portfolios (
@@ -120,16 +131,20 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
     )
     .execute(&db)
     .await?;
+    println!("✅ DEBUG: Table created successfully");
 
     // Create index for better performance
+    println!("🔧 DEBUG: Creating index...");
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_portfolios_created_at ON portfolios(created_at DESC)")
         .execute(&db)
         .await?;
+    println!("✅ DEBUG: Index created successfully");
 
     Ok(db)
 }
 
 async fn health_check() -> impl IntoResponse {
+    println!("🩺 DEBUG: Health check called");
     "OK"
 }
 
