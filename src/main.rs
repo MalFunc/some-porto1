@@ -1,9 +1,10 @@
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{DefaultBodyLimit, Multipart, Path, State, Query},
+    http::{HeaderMap, StatusCode, header::COOKIE},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
     Form, Router,
+    middleware,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPool, Row};
@@ -21,6 +22,9 @@ use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use tracing_subscriber;
 use anyhow::Result;
+
+// Simple session storage (in production, use Redis or database)
+type Sessions = Arc<DashMap<String, DateTime<Utc>>>;
 
 // Cache untuk performa
 type Cache = Arc<DashMap<String, CacheEntry>>;
@@ -48,6 +52,7 @@ struct AppState {
     db: PgPool,
     cache: Cache,
     rate_limiter: RateLimiter,
+    sessions: Sessions,
 }
 
 #[derive(Serialize, Deserialize, sqlx::FromRow)]
@@ -87,8 +92,9 @@ async fn main() -> Result<()> {
     // Setup cache and rate limiter
     let cache = Arc::new(DashMap::new());
     let rate_limiter = Arc::new(DashMap::new());
+    let sessions = Arc::new(DashMap::new());
     
-    let state = AppState { db, cache, rate_limiter };
+    let state = AppState { db, cache, rate_limiter, sessions };
 
     // Ensure upload directory exists
     if let Err(e) = fs::create_dir_all("uploads").await {
@@ -102,14 +108,16 @@ async fn main() -> Result<()> {
         .route("/", get(index))
         .route("/health", get(health_check))
         .route("/debug/portfolios", get(debug_portfolios)) // Debug endpoint
-        .route("/admin", get(admin_page))
         .route("/login", get(login_page).post(login))
         .route("/logout", post(logout))
-        .route("/admin/add", get(add_portfolio_page).post(add_portfolio))
-        .route("/admin/delete/:id", post(delete_portfolio))
         .route("/download/:filename", get(download_pdf))
         .route("/view/:id", get(view_pdf))
         .route("/like/:id", post(like_portfolio))
+        // Protected admin routes
+        .route("/admin", get(admin_page))
+        .route("/admin/add", get(add_portfolio_page).post(add_portfolio))
+        .route("/admin/delete/:id", post(delete_portfolio))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
@@ -160,6 +168,49 @@ async fn setup_database() -> Result<PgPool> {
 
     tracing::info!("✅ PostgreSQL database setup completed");
     Ok(db)
+}
+
+// Authentication middleware
+async fn auth_middleware(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<impl IntoResponse, StatusCode> {
+    let path = request.uri().path();
+    
+    // Skip auth for non-admin routes
+    if !path.starts_with("/admin") {
+        return Ok(next.run(request).await);
+    }
+    
+    // Check for valid session
+    if let Some(cookie_header) = headers.get(COOKIE) {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if cookie.starts_with("session=") {
+                    let session_id = &cookie[8..]; // Remove "session=" prefix
+                    
+                    if let Some(session_time) = state.sessions.get(session_id) {
+                        let now = Utc::now();
+                        let elapsed = now.signed_duration_since(*session_time);
+                        
+                        // Session valid for 24 hours
+                        if elapsed.num_hours() < 24 {
+                            return Ok(next.run(request).await);
+                        } else {
+                            // Remove expired session
+                            state.sessions.remove(session_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Redirect to login if not authenticated
+    Ok(Redirect::to("/login").into_response())
 }
 
 async fn health_check() -> impl IntoResponse {
@@ -395,10 +446,19 @@ async fn login_page() -> impl IntoResponse {
     Html(html)
 }
 
-async fn login(Form(form): Form<LoginForm>) -> impl IntoResponse {
+async fn login(State(state): State<AppState>, Form(form): Form<LoginForm>) -> impl IntoResponse {
     // Simple hardcoded admin credentials (in production, use hashed passwords)
     if form.username == "admin" && form.password == "maliksigma" {
-        Redirect::to("/admin").into_response()
+        // Create session
+        let session_id = Uuid::new_v4().to_string();
+        state.sessions.insert(session_id.clone(), Utc::now());
+        
+        // Set cookie and redirect
+        let cookie = format!("session={}; Path=/; HttpOnly; Max-Age=86400", session_id); // 24 hours
+        let mut response = Redirect::to("/admin").into_response();
+        response.headers_mut().insert("Set-Cookie", cookie.parse().unwrap());
+        
+        response
     } else {
         let html = r#"
 <!DOCTYPE html>
@@ -446,8 +506,24 @@ async fn login(Form(form): Form<LoginForm>) -> impl IntoResponse {
     }
 }
 
-async fn logout() -> impl IntoResponse {
-    Redirect::to("/").into_response()
+async fn logout(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    // Remove session if exists
+    if let Some(cookie_header) = headers.get(COOKIE) {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if cookie.starts_with("session=") {
+                    let session_id = &cookie[8..];
+                    state.sessions.remove(session_id);
+                }
+            }
+        }
+    }
+    
+    // Clear cookie and redirect
+    let mut response = Redirect::to("/").into_response();
+    response.headers_mut().insert("Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0".parse().unwrap());
+    response
 }
 
 async fn admin_page(State(state): State<AppState>) -> impl IntoResponse {
