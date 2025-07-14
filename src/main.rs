@@ -142,7 +142,16 @@ async fn setup_database() -> Result<PgPool> {
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/portfolio_db".to_string());
     
     tracing::info!("Connecting to PostgreSQL: {}", db_url.replace("password", "***"));
-    let db = PgPool::connect(&db_url).await?;
+    
+    // Configure connection pool for concurrent access
+    let db = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(20)      // Increase connection pool
+        .min_connections(5)       // Keep minimum connections
+        .acquire_timeout(Duration::from_secs(30))  // Timeout for getting connection
+        .idle_timeout(Duration::from_secs(600))    // 10 minutes idle timeout
+        .max_lifetime(Duration::from_secs(1800))   // 30 minutes max lifetime
+        .connect(&db_url)
+        .await?;
     
     // Create portfolios table
     sqlx::query(
