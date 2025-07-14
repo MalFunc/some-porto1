@@ -745,7 +745,7 @@ async fn add_portfolio(
     // Save to database
     let id = Uuid::new_v4().to_string();
     sqlx::query(
-        "INSERT INTO portfolios (id, title, description, pdf_filename) VALUES (?, ?, ?, ?)"
+        "INSERT INTO portfolios (id, title, description, pdf_filename) VALUES ($1, $2, $3, $4)"
     )
     .bind(&id)
     .bind(&title)
@@ -771,7 +771,7 @@ async fn delete_portfolio(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     // Get filename first to delete file
-    if let Ok(row) = sqlx::query("SELECT pdf_filename FROM portfolios WHERE id = ?")
+    if let Ok(row) = sqlx::query("SELECT pdf_filename FROM portfolios WHERE id = $1")
         .bind(&id)
         .fetch_one(&state.db)
         .await
@@ -780,7 +780,7 @@ async fn delete_portfolio(
         let _ = fs::remove_file(format!("uploads/{}", filename)).await;
     }
 
-    match sqlx::query("DELETE FROM portfolios WHERE id = ?")
+    match sqlx::query("DELETE FROM portfolios WHERE id = $1")
         .bind(&id)
         .execute(&state.db)
         .await
@@ -823,7 +823,7 @@ async fn view_pdf(
     tracing::info!("View PDF request for ID: {}", id);
     
     // Increment view count
-    let _ = sqlx::query("UPDATE portfolios SET views = views + 1 WHERE id = ?")
+    let _ = sqlx::query("UPDATE portfolios SET views = views + 1 WHERE id = $1")
         .bind(&id)
         .execute(&state.db)
         .await;
@@ -832,7 +832,7 @@ async fn view_pdf(
     state.cache.remove("index");
 
     // Get portfolio info
-    match sqlx::query("SELECT pdf_filename, title FROM portfolios WHERE id = ?")
+    match sqlx::query("SELECT pdf_filename, title FROM portfolios WHERE id = $1")
         .bind(&id)
         .fetch_one(&state.db)
         .await
@@ -893,7 +893,7 @@ async fn like_portfolio(
     }
     
     // Increment like count
-    match sqlx::query("UPDATE portfolios SET likes = likes + 1 WHERE id = ?")
+    match sqlx::query("UPDATE portfolios SET likes = likes + 1 WHERE id = $1")
         .bind(&id)
         .execute(&state.db)
         .await
