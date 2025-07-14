@@ -113,11 +113,11 @@ async fn main() -> Result<()> {
         .route("/download/:filename", get(download_pdf))
         .route("/view/:id", get(view_pdf))
         .route("/like/:id", post(like_portfolio))
-        // Temporarily disable auth middleware for debugging
+        // Protected admin routes with auth middleware
         .route("/admin", get(admin_page))
         .route("/admin/add", get(add_portfolio_page).post(add_portfolio))
         .route("/admin/delete/:id", post(delete_portfolio))
-        // .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
