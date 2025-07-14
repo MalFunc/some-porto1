@@ -11,9 +11,9 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Rust 1.80.0 menggunakan rustup
+# Install Rust 1.88.0 menggunakan rustup
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    --default-toolchain 1.80.0 \
+    --default-toolchain 1.88.0 \
     --profile minimal
 
 # Add Rust to PATH
