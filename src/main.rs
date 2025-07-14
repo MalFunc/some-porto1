@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Multipart, Path, State, ConnectInfo, DefaultBodyLimit},
+    extract::{DefaultBodyLimit, Multipart, Path, State, ConnectInfo},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
@@ -19,6 +19,7 @@ use tokio::fs;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use tracing_subscriber;
+use anyhow::Result;
 
 // Cache untuk performa
 type Cache = Arc<DashMap<String, CacheEntry>>;
@@ -72,42 +73,27 @@ struct PortfolioForm {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    println!("🚀 DEBUG: Starting CTF Portfolio application...");
+    tracing::info!("🚀 Starting MalFunc CTF Portfolio application...");
 
     // Setup database
-    println!("🔧 DEBUG: Setting up database...");
+    tracing::info!("🔧 Setting up database...");
     let db = setup_database().await?;
-    println!("✅ DEBUG: Database setup completed");
+    tracing::info!("✅ Database setup completed");
     
-    // Setup cache
-    println!("🔧 DEBUG: Setting up cache...");
+    // Setup cache and rate limiter
     let cache = Arc::new(DashMap::new());
-    println!("✅ DEBUG: Cache setup completed");
-    
-    // Setup rate limiter
-    println!("🔧 DEBUG: Setting up rate limiter...");
     let rate_limiter = Arc::new(DashMap::new());
-    println!("✅ DEBUG: Rate limiter setup completed");
     
     let state = AppState { db, cache, rate_limiter };
 
     // Ensure upload directory exists
-    println!("🔧 DEBUG: Creating upload directories...");
-    match fs::create_dir_all("uploads").await {
-        Ok(_) => println!("✅ DEBUG: uploads directory created/exists"),
-        Err(e) => {
-            println!("❌ DEBUG: uploads directory error: {}", e);
-            // Don't fail here, just log the error
-        }
+    if let Err(e) = fs::create_dir_all("uploads").await {
+        tracing::warn!("Failed to create uploads directory: {}", e);
     }
-    match fs::create_dir_all("static").await {
-        Ok(_) => println!("✅ DEBUG: static directory created/exists"),  
-        Err(e) => {
-            println!("❌ DEBUG: static directory error: {}", e);
-            // Don't fail here, just log the error
-        }
+    if let Err(e) = fs::create_dir_all("static").await {
+        tracing::warn!("Failed to create static directory: {}", e);
     }
 
     let app = Router::new()
@@ -124,28 +110,23 @@ async fn main() -> anyhow::Result<()> {
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
-        .layer(DefaultBodyLimit::disable()) // Disable default limit first
-        .layer(RequestBodyLimitLayer::new(20 * 1024 * 1024)) // Then set custom 20MB limit
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(20 * 1024 * 1024)) // 20MB limit
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    println!("🚀 Server running on http://0.0.0.0:3000");
-    println!("✅ DEBUG: Application fully initialized, starting web server...");
+    tracing::info!("🚀 Server running on http://0.0.0.0:3000");
     
     axum::serve(listener, app).await?;
     Ok(())
 }
 
-async fn setup_database() -> anyhow::Result<SqlitePool> {
-    // Use in-memory database for now to avoid permission issues
+async fn setup_database() -> Result<SqlitePool> {
     let db_url = "sqlite::memory:";
-    println!("🔧 DEBUG: Connecting to database: {}", db_url);
     let db = SqlitePool::connect(db_url).await?;
-    println!("✅ DEBUG: Database connected successfully");
     
-    // Create table manually since SQLx 0.6 doesn't have migrate! macro
-    println!("🔧 DEBUG: Creating tables...");
+    // Create portfolios table
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS portfolios (
@@ -161,20 +142,17 @@ async fn setup_database() -> anyhow::Result<SqlitePool> {
     )
     .execute(&db)
     .await?;
-    println!("✅ DEBUG: Table created successfully");
 
-    // Create index for better performance
-    println!("🔧 DEBUG: Creating index...");
+    // Create index for performance
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_portfolios_created_at ON portfolios(created_at DESC)")
         .execute(&db)
         .await?;
-    println!("✅ DEBUG: Index created successfully");
 
     Ok(db)
 }
 
 async fn health_check() -> impl IntoResponse {
-    println!("🩺 DEBUG: Health check called");
+    tracing::debug!("Health check called");
     "OK"
 }
 
@@ -672,148 +650,108 @@ async fn add_portfolio_page() -> impl IntoResponse {
 async fn add_portfolio(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut title = String::new();
     let mut description = String::new();
+    let mut pdf_data: Option<Vec<u8>> = None;
     let mut pdf_filename = String::new();
 
-    println!("🔧 DEBUG: Starting multipart processing...");
+    tracing::info!("Starting multipart processing");
 
-    // Use a more careful approach to handle multipart
-    loop {
-        match multipart.next_field().await {
-            Ok(Some(field)) => {
-                let name = match field.name() {
-                    Some(name) => name.to_string(),
-                    None => {
-                        println!("⚠️ DEBUG: Field with no name, skipping...");
-                        // Try to consume the field anyway
-                        let _ = field.bytes().await;
-                        continue;
+    while let Some(field) = multipart.next_field().await.map_err(|e| {
+        tracing::error!("Error getting next field: {}", e);
+        (StatusCode::BAD_REQUEST, format!("Multipart error: {}", e))
+    })? {
+        let name = field.name().unwrap_or("unknown").to_string();
+        tracing::debug!("Processing field: {}", name);
+        
+        match name.as_str() {
+            "title" => {
+                title = field.text().await.map_err(|e| {
+                    tracing::error!("Error reading title: {}", e);
+                    (StatusCode::BAD_REQUEST, "Error reading title".to_string())
+                })?;
+                tracing::debug!("Title received: {}", title);
+            }
+            "description" => {
+                description = field.text().await.map_err(|e| {
+                    tracing::error!("Error reading description: {}", e);
+                    (StatusCode::BAD_REQUEST, "Error reading description".to_string())
+                })?;
+                tracing::debug!("Description received ({} chars)", description.len());
+            }
+            "pdf" => {
+                if let Some(filename) = field.file_name() {
+                    tracing::debug!("Processing PDF file: {}", filename);
+                    
+                    let data = field.bytes().await.map_err(|e| {
+                        tracing::error!("Error reading PDF bytes: {}", e);
+                        (StatusCode::BAD_REQUEST, "Error reading PDF file".to_string())
+                    })?;
+                    
+                    tracing::info!("PDF data received ({} bytes)", data.len());
+                    
+                    // Check file size (20MB limit)
+                    if data.len() > 20 * 1024 * 1024 {
+                        tracing::warn!("File too large: {} bytes", data.len());
+                        return Err((StatusCode::PAYLOAD_TOO_LARGE, "File too large! Maximum size is 20MB.".to_string()));
                     }
-                };
-                
-                println!("🔧 DEBUG: Processing field: {}", name);
-                
-                match name.as_str() {
-                    "title" => {
-                        match field.text().await {
-                            Ok(text) => {
-                                title = text;
-                                println!("✅ DEBUG: Title received: {}", title);
-                            },
-                            Err(e) => {
-                                println!("❌ DEBUG: Error reading title: {}", e);
-                                return Html("Error reading title").into_response();
-                            }
-                        }
-                    }
-                    "description" => {
-                        match field.text().await {
-                            Ok(text) => {
-                                description = text;
-                                println!("✅ DEBUG: Description received ({} chars)", description.len());
-                            },
-                            Err(e) => {
-                                println!("❌ DEBUG: Error reading description: {}", e);
-                                return Html("Error reading description").into_response();
-                            }
-                        }
-                    }
-                    "pdf" => {
-                        if let Some(filename) = field.file_name() {
-                            let filename = filename.to_string();
-                            println!("🔧 DEBUG: Processing PDF file: {}", filename);
-                            
-                            match field.bytes().await {
-                                Ok(data) => {
-                                    println!("✅ DEBUG: PDF data received ({} bytes)", data.len());
-                                    
-                                    // Check file size (20MB = 20,971,520 bytes)
-                                    if data.len() > 20 * 1024 * 1024 {
-                                        println!("❌ DEBUG: File too large: {} bytes", data.len());
-                                        return Html("File too large! Maximum size is 20MB.").into_response();
-                                    }
-                                    
-                                    let uuid = Uuid::new_v4().to_string();
-                                    pdf_filename = format!("{}_{}", uuid, filename);
-                                    
-                                    println!("🔧 DEBUG: Writing file to uploads/{}", pdf_filename);
-                                    match fs::write(format!("uploads/{}", pdf_filename), data).await {
-                                        Ok(_) => println!("✅ DEBUG: File written successfully"),
-                                        Err(e) => {
-                                            println!("❌ DEBUG: File write error: {}", e);
-                                            return Html("Error uploading file").into_response();
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("❌ DEBUG: Error reading PDF bytes: {}", e);
-                                    return Html("Error reading PDF file").into_response();
-                                }
-                            }
-                        } else {
-                            // No filename, consume the field anyway
-                            let _ = field.bytes().await;
-                            println!("⚠️ DEBUG: PDF field with no filename");
-                        }
-                    }
-                    _ => {
-                        // Skip unknown fields
-                        println!("⚠️ DEBUG: Unknown field '{}', skipping...", name);
-                        match field.bytes().await {
-                            Ok(_) => {},
-                            Err(e) => {
-                                println!("❌ DEBUG: Error skipping field {}: {}", name, e);
-                                // Don't return error for unknown fields, just continue
-                            }
-                        }
-                    }
+                    
+                    let uuid = Uuid::new_v4().to_string();
+                    pdf_filename = format!("{}_{}", uuid, filename);
+                    pdf_data = Some(data.to_vec());
+                } else {
+                    // Consume field without filename
+                    let _ = field.bytes().await;
+                    tracing::warn!("PDF field with no filename");
                 }
             }
-            Ok(None) => {
-                println!("✅ DEBUG: Finished processing all fields");
-                break;
-            }
-            Err(e) => {
-                println!("❌ DEBUG: Error getting next field: {}", e);
-                return Html(format!("Error processing upload: {}", e)).into_response();
+            _ => {
+                // Skip unknown fields
+                let _ = field.bytes().await;
+                tracing::debug!("Skipping unknown field: {}", name);
             }
         }
     }
 
-    println!("🔧 DEBUG: Validation - title: '{}', desc length: {}, pdf: '{}'", 
-             title, description.len(), pdf_filename);
-
-    if !title.is_empty() && !description.is_empty() && !pdf_filename.is_empty() {
-        let id = Uuid::new_v4().to_string();
-        
-        match sqlx::query(
-            "INSERT INTO portfolios (id, title, description, pdf_filename) VALUES (?, ?, ?, ?)"
-        )
-        .bind(&id)
-        .bind(&title)
-        .bind(&description)
-        .bind(&pdf_filename)
-        .execute(&state.db)
-        .await {
-            Ok(_) => {
-                println!("✅ DEBUG: Portfolio added successfully with ID: {}", id);
-                // Clear cache
-                state.cache.remove("index");
-            }
-            Err(e) => {
-                println!("❌ DEBUG: Database error: {}", e);
-                return Html("Error saving to database").into_response();
-            }
-        }
-    } else {
-        println!("❌ DEBUG: Missing required fields - title: '{}', desc: '{}', pdf: '{}'", 
-                 title, description, pdf_filename);
-        return Html("Missing required fields. Please fill all fields and select a PDF file.").into_response();
+    // Validate required fields
+    if title.is_empty() || description.is_empty() || pdf_data.is_none() {
+        tracing::warn!("Missing required fields - title: '{}', desc length: {}, has_pdf: {}", 
+                     title, description.len(), pdf_data.is_some());
+        return Err((StatusCode::BAD_REQUEST, "Missing required fields. Please fill all fields and select a PDF file.".to_string()));
     }
 
-    Redirect::to("/admin").into_response()
+    // Write file to disk
+    if let Some(data) = pdf_data {
+        fs::write(format!("uploads/{}", pdf_filename), data).await.map_err(|e| {
+            tracing::error!("File write error: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error uploading file".to_string())
+        })?;
+        tracing::info!("File written successfully: {}", pdf_filename);
+    }
+
+    // Save to database
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO portfolios (id, title, description, pdf_filename) VALUES (?, ?, ?, ?)"
+    )
+    .bind(&id)
+    .bind(&title)
+    .bind(&description)
+    .bind(&pdf_filename)
+    .execute(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!("Database error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, "Error saving to database".to_string())
+    })?;
+
+    tracing::info!("Portfolio added successfully with ID: {}", id);
+    
+    // Clear cache
+    state.cache.remove("index");
+
+    Ok(Redirect::to("/admin"))
 }
 
 async fn delete_portfolio(
