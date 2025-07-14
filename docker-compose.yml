@@ -1,6 +1,28 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: portfolio_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: portfolio_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: maliksigma_db_pass
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d portfolio_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     container_name: ctf-portfolio
@@ -10,8 +32,12 @@ services:
       - ./data:/app/data
     environment:
       - RUST_LOG=info
+      - DATABASE_URL=postgresql://postgres:maliksigma_db_pass@postgres:5432/portfolio_db
     networks:
       - web
+    depends_on:
+      postgres:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ctf-portfolio.rule=Host(`${DOMAIN}`)"
@@ -63,3 +89,7 @@ services:
 networks:
   web:
     external: false
+
+volumes:
+  postgres_data:
+    driver: local

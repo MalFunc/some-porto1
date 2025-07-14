@@ -1,19 +1,20 @@
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, State, ConnectInfo},
+    extract::{DefaultBodyLimit, Multipart, Path, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect},
     routing::{get, post},
     Form, Router,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqlitePool, Row};
-use std::{sync::Arc, time::Duration, net::SocketAddr};
+use sqlx::{postgres::PgPool, Row};
+use std::{sync::Arc, time::Duration};
 use tower_http::{
     compression::CompressionLayer,
     services::ServeDir,
     cors::CorsLayer,
     limit::RequestBodyLimitLayer,
 };
+use tower::ServiceBuilder;
 use dashmap::DashMap;
 use tokio::fs;
 use uuid::Uuid;
@@ -44,7 +45,7 @@ impl CacheEntry {
 
 #[derive(Clone)]
 struct AppState {
-    db: SqlitePool,
+    db: PgPool,
     cache: Cache,
     rate_limiter: RateLimiter,
 }
@@ -67,6 +68,7 @@ struct LoginForm {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // Form struct for potential future use
 struct PortfolioForm {
     title: String,
     description: String,
@@ -99,6 +101,7 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/health", get(health_check))
+        .route("/debug/portfolios", get(debug_portfolios)) // Debug endpoint
         .route("/admin", get(admin_page))
         .route("/login", get(login_page).post(login))
         .route("/logout", post(logout))
@@ -110,10 +113,13 @@ async fn main() -> Result<()> {
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/uploads", ServeDir::new("uploads"))
         .with_state(state)
-        .layer(DefaultBodyLimit::disable())
-        .layer(RequestBodyLimitLayer::new(20 * 1024 * 1024)) // 20MB limit
-        .layer(CompressionLayer::new())
-        .layer(CorsLayer::permissive());
+        .layer(
+            ServiceBuilder::new()
+                .layer(DefaultBodyLimit::disable())
+                .layer(RequestBodyLimitLayer::new(20 * 1024 * 1024)) // 20MB limit
+                .layer(CompressionLayer::new())
+                .layer(CorsLayer::permissive())
+        );
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("🚀 Server running on http://0.0.0.0:3000");
@@ -122,9 +128,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn setup_database() -> Result<SqlitePool> {
-    let db_url = "sqlite::memory:";
-    let db = SqlitePool::connect(db_url).await?;
+async fn setup_database() -> Result<PgPool> {
+    // Use environment variable or default to local PostgreSQL
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://postgres:password@localhost:5432/portfolio_db".to_string());
+    
+    tracing::info!("Connecting to PostgreSQL: {}", db_url.replace("password", "***"));
+    let db = PgPool::connect(&db_url).await?;
     
     // Create portfolios table
     sqlx::query(
@@ -134,9 +144,9 @@ async fn setup_database() -> Result<SqlitePool> {
             title TEXT NOT NULL,
             description TEXT NOT NULL,
             pdf_filename TEXT NOT NULL,
-            likes INTEGER DEFAULT 0,
-            views INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            likes BIGINT DEFAULT 0,
+            views BIGINT DEFAULT 0,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
         "#,
     )
@@ -148,6 +158,7 @@ async fn setup_database() -> Result<SqlitePool> {
         .execute(&db)
         .await?;
 
+    tracing::info!("✅ PostgreSQL database setup completed");
     Ok(db)
 }
 
@@ -682,6 +693,7 @@ async fn add_portfolio(
             }
             "pdf" => {
                 if let Some(filename) = field.file_name() {
+                    let filename = filename.to_string(); // Clone filename before moving field
                     tracing::debug!("Processing PDF file: {}", filename);
                     
                     let data = field.bytes().await.map_err(|e| {
@@ -808,6 +820,8 @@ async fn view_pdf(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
+    tracing::info!("View PDF request for ID: {}", id);
+    
     // Increment view count
     let _ = sqlx::query("UPDATE portfolios SET views = views + 1 WHERE id = ?")
         .bind(&id)
@@ -818,38 +832,54 @@ async fn view_pdf(
     state.cache.remove("index");
 
     // Get portfolio info
-    if let Ok(row) = sqlx::query("SELECT pdf_filename, title FROM portfolios WHERE id = ?")
+    match sqlx::query("SELECT pdf_filename, title FROM portfolios WHERE id = ?")
         .bind(&id)
         .fetch_one(&state.db)
         .await
     {
-        let filename: String = row.get("pdf_filename");
-        let _title: String = row.get("title");
-        
-        match fs::read(format!("uploads/{}", filename)).await {
-            Ok(data) => {
-                let mut headers = HeaderMap::new();
-                if let Ok(content_type) = "application/pdf".parse() {
-                    headers.insert("Content-Type", content_type);
+        Ok(row) => {
+            let filename: String = row.get("pdf_filename");
+            let title: String = row.get("title");
+            tracing::info!("Found portfolio '{}' with file: {}", title, filename);
+            
+            match fs::read(format!("uploads/{}", filename)).await {
+                Ok(data) => {
+                    tracing::info!("Successfully read PDF file: {} ({} bytes)", filename, data.len());
+                    let mut headers = HeaderMap::new();
+                    if let Ok(content_type) = "application/pdf".parse() {
+                        headers.insert("Content-Type", content_type);
+                    }
+                    if let Ok(disposition) = format!("inline; filename=\"{}\"", filename).parse() {
+                        headers.insert("Content-Disposition", disposition);
+                    }
+                    (StatusCode::OK, headers, data).into_response()
                 }
-                if let Ok(disposition) = format!("inline; filename=\"{}\"", filename).parse() {
-                    headers.insert("Content-Disposition", disposition);
+                Err(e) => {
+                    tracing::error!("Failed to read PDF file {}: {}", filename, e);
+                    StatusCode::NOT_FOUND.into_response()
                 }
-                (StatusCode::OK, headers, data).into_response()
             }
-            Err(_) => StatusCode::NOT_FOUND.into_response(),
         }
-    } else {
-        StatusCode::NOT_FOUND.into_response()
+        Err(e) => {
+            tracing::warn!("Portfolio with ID {} not found: {}", id, e);
+            StatusCode::NOT_FOUND.into_response()
+        }
     }
 }
 
 async fn like_portfolio(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    let client_ip = addr.ip().to_string();
+    // Get client IP from headers (for proxy/load balancer setups) or use a default
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|h| h.to_str().ok())
+        .or_else(|| headers.get("x-real-ip").and_then(|h| h.to_str().ok()))
+        .unwrap_or("unknown")
+        .to_string();
+    
     let rate_key = format!("{}:{}", client_ip, id);
     
     // Check rate limiting (5 menit = 300 detik)
@@ -857,17 +887,17 @@ async fn like_portfolio(
         let now = Utc::now();
         let elapsed = now.signed_duration_since(*last_like_time);
         if elapsed.num_seconds() < 300 { // 5 menit
+            tracing::debug!("Rate limit hit for IP {} on portfolio {}", client_ip, id);
             return (StatusCode::TOO_MANY_REQUESTS, "Rate limited: Wait 5 minutes before liking again").into_response();
         }
     }
     
     // Increment like count
-    let result = sqlx::query("UPDATE portfolios SET likes = likes + 1 WHERE id = ?")
+    match sqlx::query("UPDATE portfolios SET likes = likes + 1 WHERE id = ?")
         .bind(&id)
         .execute(&state.db)
-        .await;
-
-    match result {
+        .await
+    {
         Ok(_) => {
             // Update rate limiter
             state.rate_limiter.insert(rate_key, Utc::now());
@@ -875,8 +905,42 @@ async fn like_portfolio(
             // Clear cache since like count changed
             state.cache.remove("index");
             
-            StatusCode::OK.into_response()
+            tracing::info!("Like added to portfolio {} from IP {}", id, client_ip);
+            (StatusCode::OK, "Liked successfully").into_response()
         }
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!("Failed to add like to portfolio {}: {}", id, e);
+            (StatusCode::NOT_FOUND, "Portfolio not found").into_response()
+        }
     }
+}
+
+async fn debug_portfolios(State(state): State<AppState>) -> impl IntoResponse {
+    tracing::info!("Debug endpoint called - listing all portfolios");
+    
+    let portfolios = sqlx::query_as::<_, Portfolio>(
+        "SELECT id, title, description, pdf_filename, likes, views, created_at FROM portfolios ORDER BY created_at DESC"
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut response = format!("Total portfolios: {}\n\n", portfolios.len());
+    
+    for (idx, portfolio) in portfolios.iter().enumerate() {
+        response.push_str(&format!(
+            "{}. ID: {}\n   Title: {}\n   File: {}\n   Created: {}\n\n",
+            idx + 1,
+            portfolio.id,
+            portfolio.title,
+            portfolio.pdf_filename,
+            portfolio.created_at
+        ));
+    }
+    
+    if portfolios.is_empty() {
+        response.push_str("No portfolios found in database.\n");
+    }
+    
+    response
 }
