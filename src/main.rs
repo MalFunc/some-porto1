@@ -129,9 +129,9 @@ async fn main() -> Result<()> {
 }
 
 async fn setup_database() -> Result<PgPool> {
-    // Use environment variable or default to local PostgreSQL
+    // Use environment variable or default to Docker PostgreSQL
     let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://postgres:password@localhost:5432/portfolio_db".to_string());
+        .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/portfolio_db".to_string());
     
     tracing::info!("Connecting to PostgreSQL: {}", db_url.replace("password", "***"));
     let db = PgPool::connect(&db_url).await?;
